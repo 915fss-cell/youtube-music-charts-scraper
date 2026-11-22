@@ -2,10 +2,11 @@ import asyncio
 import json
 import os
 import re
-import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from urllib.request import Request, urlopen
 
 import asyncpg
 from fastapi import FastAPI, HTTPException
@@ -15,12 +16,9 @@ from pydantic import BaseModel, Field, HttpUrl
 
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT / "src"))
-
-from config import URL as CHART_URL
-from scraper.browser_manager import BrowserManager
-from scraper.fetcher import Fetcher
-from scraper.processor import Parser
+YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3/videos"
+YOUTUBE_REGION = "US"
+YOUTUBE_MUSIC_CATEGORY_ID = "10"
 
 
 pool: asyncpg.Pool | None = None
@@ -85,20 +83,116 @@ def rank_number(value: str | None) -> int | None:
     return int(match.group()) if match else None
 
 
-def scrape_chart() -> list[dict]:
-    with BrowserManager(headless=True) as browser:
-        fetcher = Fetcher(browser=browser)
-        fetcher.fetch(CHART_URL, scroll=True)
-        if any("recaptcha/enterprise" in frame.url for frame in browser.page.frames):
-            raise ChartUnavailable(
-                "YouTube Charts is showing a Google verification challenge. This app does not bypass verification; try again later."
-            )
-        entries = Parser(browser=browser).parse_songs()
-        if not entries:
-            raise ChartUnavailable(
-                "YouTube Music returned no chart entries. The chart may be unavailable or its page structure may have changed."
-            )
-        return entries
+def youtube_api_request(parameters: dict[str, str]) -> dict:
+    api_key = os.environ.get("YOUTUBE_DATA_API_KEY", "").strip()
+    if not api_key:
+        raise ChartUnavailable(
+            "Add YOUTUBE_DATA_API_KEY under Project Settings → Vars, then reload popular music videos."
+        )
+
+    query = urlencode({**parameters, "key": api_key})
+    request = Request(
+        f"{YOUTUBE_API_URL}?{query}",
+        headers={"Accept": "application/json", "User-Agent": "YouTubeChartsTracker/1.0"},
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            return json.loads(response.read())
+    except HTTPError as error:
+        try:
+            payload = json.loads(error.read())
+            reason = payload.get("error", {}).get("errors", [{}])[0].get("reason", "")
+        except (json.JSONDecodeError, AttributeError, IndexError, TypeError):
+            reason = ""
+
+        if reason == "quotaExceeded":
+            message = "YouTube Data API quota is exhausted. Try again after the quota resets."
+        elif reason in {"accessNotConfigured", "serviceDisabled"}:
+            message = "Enable YouTube Data API v3 in the Google Cloud project for this API key."
+        elif reason in {"keyInvalid", "invalid"}:
+            message = "YOUTUBE_DATA_API_KEY is invalid. Check the key in the project environment variables."
+        else:
+            message = "YouTube Data API rejected the request. Check that the API is enabled and the key is valid."
+        raise ChartUnavailable(message) from error
+    except (URLError, TimeoutError) as error:
+        raise ChartUnavailable("YouTube Data API could not be reached. Please try again shortly.") from error
+    except json.JSONDecodeError as error:
+        raise ChartUnavailable("YouTube Data API returned an unreadable response.") from error
+
+
+def video_entry(video: dict, rank: int | None = None) -> dict | None:
+    video_id = video.get("id")
+    if not isinstance(video_id, str) or not video_id:
+        return None
+
+    snippet = video.get("snippet") or {}
+    statistics = video.get("statistics") or {}
+    channel = snippet.get("channelTitle") or "Unknown channel"
+    thumbnails = snippet.get("thumbnails") or {}
+    thumbnail = next(
+        (thumbnails[size]["url"] for size in ("maxres", "high", "medium", "default")
+         if thumbnails.get(size, {}).get("url")),
+        None,
+    )
+    view_count = statistics.get("viewCount")
+
+    return {
+        "rank": str(rank) if rank is not None else None,
+        "title": snippet.get("title") or "Untitled video",
+        "url": f"https://www.youtube.com/watch?v={video_id}",
+        "artists": [channel],
+        "thumbnail": thumbnail,
+        "metrics": {
+            "view_count": str(view_count) if view_count is not None else None,
+            "weekly_views": str(view_count) if view_count is not None else None,
+            "release_date": (snippet.get("publishedAt") or "")[:10] or None,
+        },
+    }
+
+
+def fetch_popular_music() -> list[dict]:
+    payload = youtube_api_request(
+        {
+            "part": "snippet,statistics",
+            "chart": "mostPopular",
+            "videoCategoryId": YOUTUBE_MUSIC_CATEGORY_ID,
+            "regionCode": YOUTUBE_REGION,
+            "maxResults": "50",
+        }
+    )
+    videos = payload.get("items") or []
+    entries = [entry for index, video in enumerate(videos, start=1) if (entry := video_entry(video, index))]
+    if not entries:
+        raise ChartUnavailable("YouTube returned no popular music videos for this region.")
+    return entries
+
+
+def youtube_video_id(value: str) -> str | None:
+    parsed = urlparse(value)
+    if parsed.hostname == "youtu.be":
+        return parsed.path.strip("/").split("/")[0] or None
+    if parsed.hostname in {"youtube.com", "www.youtube.com", "music.youtube.com"}:
+        if parsed.path == "/watch":
+            return parse_qs(parsed.query).get("v", [None])[0]
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) == 2 and parts[0] in {"shorts", "live", "embed"}:
+            return parts[1]
+    return None
+
+
+def fetch_video_details(video_ids: list[str]) -> dict[str, dict]:
+    entries: dict[str, dict] = {}
+    unique_ids = list(dict.fromkeys(video_id for video_id in video_ids if video_id))
+    for start in range(0, len(unique_ids), 50):
+        batch = unique_ids[start : start + 50]
+        payload = youtube_api_request(
+            {"part": "snippet,statistics", "id": ",".join(batch)}
+        )
+        for video in payload.get("items") or []:
+            entry = video_entry(video)
+            if entry:
+                entries[video["id"]] = entry
+    return entries
 
 
 def require_pool() -> asyncpg.Pool:
@@ -123,12 +217,12 @@ async def health():
 @app.get("/api/chart")
 async def current_chart():
     try:
-        entries = await asyncio.to_thread(scrape_chart)
+        entries = await asyncio.to_thread(fetch_popular_music)
         return [entry for entry in entries if entry.get("url") and entry.get("title")]
     except ChartUnavailable as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as error:
-        raise HTTPException(status_code=502, detail="The YouTube Music chart could not be loaded. Please try again shortly.") from error
+        raise HTTPException(status_code=502, detail="Popular music videos could not be loaded. Please try again shortly.") from error
 
 
 @app.get("/api/tracked")
@@ -217,27 +311,31 @@ async def save_tracked(selection: TrackSelection):
 async def refresh_tracked():
     database = require_pool()
     try:
-        entries = await asyncio.to_thread(scrape_chart)
+        entries = await asyncio.to_thread(fetch_popular_music)
+        async with database.acquire() as connection:
+            tracked = await connection.fetch("SELECT id, video_url FROM tracked_items WHERE is_active = TRUE")
+        tracked_ids = [youtube_video_id(item["video_url"]) for item in tracked]
+        details = await asyncio.to_thread(fetch_video_details, tracked_ids)
     except ChartUnavailable as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as error:
-        raise HTTPException(status_code=502, detail="The YouTube Music chart could not be refreshed.") from error
+        raise HTTPException(status_code=502, detail="Popular music videos could not be refreshed.") from error
 
-    by_url = {}
-    for entry in entries:
-        try:
-            by_url[normalize_youtube_url(entry["url"])] = entry
-        except (HTTPException, KeyError, TypeError):
-            continue
+    chart_by_id = {
+        youtube_video_id(entry["url"]): entry
+        for entry in entries
+        if youtube_video_id(entry["url"])
+    }
 
     updated = 0
     async with database.acquire() as connection:
         async with connection.transaction():
-            tracked = await connection.fetch("SELECT id, video_url FROM tracked_items WHERE is_active = TRUE")
             for item in tracked:
-                entry = by_url.get(item["video_url"])
+                video_id = youtube_video_id(item["video_url"])
+                entry = details.get(video_id)
                 if not entry:
                     continue
+                entry["rank"] = chart_by_id.get(video_id, {}).get("rank")
                 metrics = entry.get("metrics") or {}
                 await connection.execute(
                     """

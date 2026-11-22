@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f4f3ee" />
-    <meta name="description" content="Track the songs and videos you choose from YouTube Music charts." />
-    <title>YouTube Charts — your charts, in focus</title>
+    <meta name="description" content="Track popular YouTube music videos, their current rankings, and daily view-count snapshots." />
+    <title>YouTube Music Videos — your charts, in focus</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -20,7 +20,7 @@
           <span>YouTube Charts<span class="brand-period">.</span></span>
         </a>
         <div class="topbar-right">
-          <span class="source-label"><span class="live-dot"></span> YOUTUBE MUSIC · GLOBAL WEEKLY</span>
+          <span class="source-label"><span class="live-dot"></span> YOUTUBE · POPULAR MUSIC · US</span>
           <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh chart snapshots" title="Refresh tracked chart snapshots">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 7.5A6.8 6.8 0 0 0 4.2 5.2L2.8 7M3 3.6v3.7h3.7M3.5 12.5a6.8 6.8 0 0 0 12.3 2.3l1.4-1.8m-.2 3.4v-3.7h-3.7" /></svg>
           </button>
@@ -32,10 +32,10 @@
           <div class="intro-copy">
             <p class="eyebrow">YOUR PERSONAL CHART EDITION <span class="eyebrow-rule"></span></p>
             <h1 id="page-title">The charts,<br /><span>on your terms.</span></h1>
-            <p class="intro-description">Pick the songs and videos you care about. We&apos;ll keep their chart movement and weekly stats together, right here.</p>
+            <p class="intro-description">Pick the music videos you care about. We&apos;ll save their current rankings and view counts over time, right here.</p>
             <button class="primary-button" id="load-chart-button" type="button">
               <svg class="button-spark" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5v4m0 7v4m7.5-7.5h-4m-7 0h-4m12.8-5.3-2.8 2.8m-5 5-2.8 2.8m10.6 0-2.8-2.8m-5-5L5.7 4.7" /></svg>
-              <span>Explore this week&apos;s chart</span>
+              <span>Explore popular music videos</span>
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" /></svg>
             </button>
           </div>
@@ -62,7 +62,7 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th scope="col">SONG / VIDEO</th><th scope="col">THIS WEEK</th><th scope="col">WEEKLY VIEWS</th><th scope="col">ON CHART</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+              <thead><tr><th scope="col">MUSIC VIDEO</th><th scope="col">CURRENT RANK</th><th scope="col">TOTAL VIEWS</th><th scope="col">DAYS TRACKED</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
               <tbody id="tracked-body"><tr><td colspan="5" class="loading-cell">Connecting to your collection…</td></tr></tbody>
             </table>
           </div>
@@ -70,7 +70,7 @@
 
         <section class="chart-section" id="chart-section" aria-labelledby="chart-title" hidden>
           <div class="section-heading chart-heading">
-            <div><p class="eyebrow">FRESH FROM YOUTUBE MUSIC</p><h2 id="chart-title">This week&apos;s chart</h2><p class="section-subtitle" id="chart-subtitle">Choose the songs you want to follow.</p></div>
+            <div><p class="eyebrow">YOUTUBE MOST POPULAR</p><h2 id="chart-title">Popular music videos</h2><p class="section-subtitle" id="chart-subtitle">Choose the videos you want to follow.</p></div>
             <button class="quiet-button" id="close-chart-button" type="button">Close <span aria-hidden="true">×</span></button>
           </div>
           <div class="chart-toolbar"><label class="search-field"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.8" cy="8.8" r="5.8"/><path d="m13.2 13.2 4 4"/></svg><span class="sr-only">Filter chart results</span><input id="chart-search" type="search" placeholder="Find a song or artist" autocomplete="off" /></label><span class="selection-count" id="selection-count">0 selected</span></div>
