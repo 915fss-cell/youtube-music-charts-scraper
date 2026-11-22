@@ -42,7 +42,7 @@ async def lifespan(_: FastAPI):
         pool = None
 
 
-app = FastAPI(title="Chartroom", lifespan=lifespan)
+app = FastAPI(title="YouTube Charts", lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=ROOT / "web"), name="assets")
 
 
