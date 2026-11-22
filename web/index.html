@@ -3,87 +3,113 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f4f3ee" />
-    <meta name="description" content="Track popular YouTube music videos, their current rankings, and daily view-count snapshots." />
-    <title>YouTube Music Videos — your charts, in focus</title>
+    <meta name="theme-color" content="#0b1113" />
+    <meta name="description" content="Collect, monitor, and compare YouTube Charts snapshots across regions and dates." />
+    <title>YouTube Charts — Track charts over time</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20261122" />
     <script>
       window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
     </script>
     <script defer src="/_vercel/insights/script.js"></script>
-    <script src="/assets/app.js" defer></script>
+    <script src="/assets/app.js?v=20261122" defer></script>
   </head>
   <body>
-    <div class="app-shell">
+    <div class="auth-gate" id="auth-gate" hidden>
+      <div class="auth-card">
+        <a class="brand" href="/" aria-label="YouTube Charts home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>youtube charts</span></a>
+        <p class="eyebrow">YOUR CHART ARCHIVE</p>
+        <h1 id="auth-title">Welcome back.</h1>
+        <p class="auth-copy">Sign in to collect weekly charts and keep your snapshots private.</p>
+        <form id="auth-form" class="auth-form">
+          <label for="auth-email">Email address</label>
+          <input id="auth-email" name="email" type="email" autocomplete="email" required />
+          <label for="auth-password">Password</label>
+          <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="8" required />
+          <p class="form-error" id="auth-error" role="alert" hidden></p>
+          <button class="button button-accent button-wide" id="auth-submit" type="submit">Sign in <span aria-hidden="true">↗</span></button>
+        </form>
+        <button class="link-button auth-toggle" id="auth-toggle" type="button">New here? Create an account</button>
+      </div>
+    </div>
+
+    <div class="app-shell" id="dashboard" hidden>
       <header class="topbar">
-        <a class="brand" href="/" aria-label="YouTube Charts home">
-          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
-          <span>YouTube Charts<span class="brand-period">.</span></span>
-        </a>
-        <div class="topbar-right">
-          <span class="source-label"><span class="live-dot"></span> YOUTUBE · POPULAR MUSIC · US</span>
-          <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh chart snapshots" title="Refresh tracked chart snapshots">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 7.5A6.8 6.8 0 0 0 4.2 5.2L2.8 7M3 3.6v3.7h3.7M3.5 12.5a6.8 6.8 0 0 0 12.3 2.3l1.4-1.8m-.2 3.4v-3.7h-3.7" /></svg>
-          </button>
-        </div>
+        <a class="brand" href="/" aria-label="YouTube Charts home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>youtube charts</span></a>
+        <div class="topbar-center"><span class="status-dot"></span><span>YOUTUBE CHARTS</span><span class="topbar-divider">/</span><span>WEEKLY ARCHIVE</span></div>
+        <div class="account"><span class="account-email" id="account-email"></span><button class="icon-button" id="signout-button" type="button" aria-label="Sign out" title="Sign out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5M15 12H3m9-8h7a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-7" /></svg></button></div>
       </header>
 
       <main>
-        <section class="intro" aria-labelledby="page-title">
-          <div class="intro-copy">
-            <p class="eyebrow">YOUR PERSONAL CHART EDITION <span class="eyebrow-rule"></span></p>
-            <h1 id="page-title">The charts,<br /><span>on your terms.</span></h1>
-            <p class="intro-description">Pick the music videos you care about. We&apos;ll save their current rankings and view counts over time, right here.</p>
-            <button class="primary-button" id="load-chart-button" type="button">
-              <svg class="button-spark" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5v4m0 7v4m7.5-7.5h-4m-7 0h-4m12.8-5.3-2.8 2.8m-5 5-2.8 2.8m10.6 0-2.8-2.8m-5-5L5.7 4.7" /></svg>
-              <span>Explore popular music videos</span>
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" /></svg>
-            </button>
+        <section class="hero">
+          <div class="hero-copy">
+            <p class="eyebrow">A CLEARER VIEW OF WHAT MOVES</p>
+            <h1>Charts have<br /><span>a longer memory.</span></h1>
+            <p class="hero-description">Collect a chart once. Compare every rank, region, and week that follows.</p>
           </div>
-          <div class="intro-art" aria-hidden="true">
-            <div class="orbit orbit-one"></div>
-            <div class="orbit orbit-two"></div>
-            <div class="record"><div class="record-groove groove-one"></div><div class="record-groove groove-two"></div><div class="record-groove groove-three"></div><div class="record-label"><span>YOUTUBE<br />CHARTS</span><i></i></div></div>
-            <div class="art-note note-one">NOW<br />PLAYING</div>
-            <div class="art-note note-two">YOUR<br />FREQUENCY</div>
-            <span class="art-star star-one"></span><span class="art-star star-two"></span>
+          <div class="hero-aside" aria-label="Collection cadence">
+            <div class="orbit orbit-a"></div><div class="orbit orbit-b"></div>
+            <div class="orbit-core"><span class="core-wave"><i></i><i></i><i></i><i></i><i></i></span><span>WEEK<br />BY WEEK</span></div>
+            <span class="orbit-label label-top">3 CHART TYPES</span><span class="orbit-label label-bottom">21 MARKETS</span>
           </div>
         </section>
 
-        <section class="stats-grid" aria-label="Tracking overview">
-          <article class="stat-card stat-featured"><span class="stat-kicker">IN YOUR ROTATION</span><div class="stat-main"><strong id="tracked-count">—</strong><span>tracked picks</span></div><span class="stat-foot">A collection that&apos;s yours</span><div class="stat-mark" aria-hidden="true">↗</div></article>
-          <article class="stat-card"><span class="stat-kicker">SNAPSHOTS SAVED</span><div class="stat-main"><strong id="snapshot-count">—</strong><span>daily records</span></div><span class="stat-foot">One datapoint per day</span></article>
-          <article class="stat-card"><span class="stat-kicker">LAST CHECK-IN</span><div class="stat-main"><strong class="stat-date" id="last-updated">—</strong></div><span class="stat-foot">Refresh to capture today&apos;s chart</span><span class="stat-clock" aria-hidden="true"></span></article>
+        <section class="metric-grid" aria-label="Collection overview">
+          <article class="metric-card metric-highlight"><span class="metric-label">CHART ENTRIES</span><strong id="metric-entries">—</strong><span class="metric-note">saved to your archive</span><span class="metric-glyph" aria-hidden="true">↗</span></article>
+          <article class="metric-card"><span class="metric-label">SNAPSHOTS</span><strong id="metric-snapshots">—</strong><span class="metric-note">unique market-days</span></article>
+          <article class="metric-card"><span class="metric-label">ACTIVE JOBS</span><strong id="metric-jobs">—</strong><span class="metric-note">queued or collecting</span></article>
+          <article class="metric-card"><span class="metric-label">LATEST WEEK</span><strong class="metric-date" id="metric-date">—</strong><span class="metric-note">most recent saved chart</span></article>
         </section>
 
-        <section class="tracking-section" aria-labelledby="tracking-title">
-          <div class="section-heading">
-            <div><p class="eyebrow">THE SHORTLIST</p><h2 id="tracking-title">Your tracked picks<span class="heading-count" id="heading-count">00</span></h2></div>
-            <button class="text-button" id="open-chart-button" type="button">+ Add from chart</button>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th scope="col">MUSIC VIDEO</th><th scope="col">CURRENT RANK</th><th scope="col">TOTAL VIEWS</th><th scope="col">DAYS TRACKED</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
-              <tbody id="tracked-body"><tr><td colspan="5" class="loading-cell">Connecting to your collection…</td></tr></tbody>
-            </table>
-          </div>
+        <section class="work-grid" aria-label="Collection controls and job queue">
+          <article class="panel collection-panel">
+            <div class="panel-heading"><div><p class="eyebrow">01 / SET THE SCOPE</p><h2>New collection</h2></div><span class="panel-index">+01</span></div>
+            <form id="job-form" class="collection-form">
+              <div class="field-row">
+                <label class="field"><span>Chart</span><select id="chart-type" name="chart_type"><option value="TopSongs">Top songs</option><option value="TopMusicVideos">Top music videos</option><option value="TopArtists">Top artists</option></select></label>
+                <label class="field"><span>Tracked entity</span><select id="entity-type" name="entity_type"><option value="all">Whole chart</option><option value="video">Video</option><option value="channel">Channel / artist</option><option value="artist">Artist</option></select></label>
+              </div>
+              <label class="field entity-field" id="entity-field" hidden><span>Entity ID or name</span><input id="entity-id" name="entity_id" maxlength="200" placeholder="Paste an ID or enter a name" /></label>
+              <fieldset class="market-fieldset"><legend>Markets <span id="market-count">1 selected</span></legend><div class="market-grid" id="market-options"></div></fieldset>
+              <div class="field-row date-row">
+                <label class="field"><span>From week</span><input id="start-date" type="date" min="2016-01-01" required /></label>
+                <label class="field"><span>Through week</span><input id="end-date" type="date" min="2016-01-01" required /></label>
+              </div>
+              <p class="field-hint">One snapshot is requested for each calendar day. YouTube publishes weekly charts, so the same chart may appear across several daily snapshots.</p>
+              <div class="save-row"><label class="check-label"><input id="save-configuration" type="checkbox" checked /><span>Save as a reusable setup</span></label><input id="configuration-name" type="text" maxlength="80" value="Weekly songs — US" aria-label="Reusable setup name" /></div>
+              <p class="form-error" id="job-error" role="alert" hidden></p>
+              <button class="button button-accent button-wide" id="start-job-button" type="submit"><span>Start collection</span><span aria-hidden="true">↗</span></button>
+            </form>
+            <div class="saved-setups"><div class="saved-heading"><span>Saved setups</span><button class="link-button" id="refresh-configurations" type="button">Refresh</button></div><div class="setup-list" id="setup-list"><span class="muted">No saved setups yet.</span></div></div>
+          </article>
+
+          <article class="panel jobs-panel">
+            <div class="panel-heading"><div><p class="eyebrow">02 / LIVE OPERATIONS</p><h2>Collection jobs</h2></div><button class="icon-button" id="refresh-jobs" type="button" aria-label="Refresh job status" title="Refresh job status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2" /></svg></button></div>
+            <div class="jobs-list" id="jobs-list"><div class="empty-panel">Your collection queue is ready.<span>Start a job to see market-by-market progress here.</span></div></div>
+          </article>
         </section>
 
-        <section class="chart-section" id="chart-section" aria-labelledby="chart-title" hidden>
-          <div class="section-heading chart-heading">
-            <div><p class="eyebrow">YOUTUBE MOST POPULAR</p><h2 id="chart-title">Popular music videos</h2><p class="section-subtitle" id="chart-subtitle">Choose the videos you want to follow.</p></div>
-            <button class="quiet-button" id="close-chart-button" type="button">Close <span aria-hidden="true">×</span></button>
+        <section class="analysis-section" aria-labelledby="analysis-title">
+          <div class="section-heading"><div><p class="eyebrow">03 / READ THE HISTORY</p><h2 id="analysis-title">Snapshot explorer</h2><p class="section-subtitle">Changes compare each entry with its latest earlier saved snapshot.</p></div><span class="archive-badge"><span class="status-dot"></span> YOUR DATABASE</span></div>
+          <div class="analysis-panel">
+            <form class="filter-bar" id="filter-form">
+              <label class="field"><span>Chart</span><select id="filter-chart"><option value="">All charts</option><option value="TopSongs">Top songs</option><option value="TopMusicVideos">Top music videos</option><option value="TopArtists">Top artists</option></select></label>
+              <label class="field"><span>Market</span><select id="filter-market"><option value="">All markets</option></select></label>
+              <label class="field"><span>Entity</span><select id="filter-entity"><option value="">All entities</option></select></label>
+              <label class="field"><span>From</span><input id="filter-start" type="date" /></label>
+              <label class="field"><span>To</span><input id="filter-end" type="date" /></label>
+              <button class="button button-quiet" type="submit">Apply filters</button>
+            </form>
+            <div class="trend-card"><div class="trend-heading"><div><span class="metric-label">AVERAGE CHART RANK</span><p id="trend-caption">Collect snapshots to reveal a trend.</p></div><span class="trend-range" id="trend-range">—</span></div><div class="trend-chart" id="trend-chart"><div class="trend-empty">Your saved chart history will appear here.</div></div></div>
+            <div class="table-meta"><span id="entry-count">No saved entries</span><span class="delta-key"><i class="positive"></i>UP THE CHART <i class="negative"></i>DOWN THE CHART</span></div>
+            <div class="table-wrap"><table><thead><tr><th scope="col">DATE / MARKET</th><th scope="col">CHART ENTRY</th><th scope="col">RANK</th><th scope="col">RANK CHANGE</th><th scope="col">WEEKLY VIEWS</th><th scope="col">VIEW CHANGE VS PRIOR</th></tr></thead><tbody id="entries-body"><tr><td colspan="6" class="loading-cell">Loading your archive…</td></tr></tbody></table></div>
+            <div class="pagination"><span id="page-indicator">Page 1</span><div><button class="button button-quiet" id="prev-page" type="button" disabled>Previous</button><button class="button button-quiet" id="next-page" type="button" disabled>Next</button></div></div>
           </div>
-          <div class="chart-toolbar"><label class="search-field"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.8" cy="8.8" r="5.8"/><path d="m13.2 13.2 4 4"/></svg><span class="sr-only">Filter chart results</span><input id="chart-search" type="search" placeholder="Find a song or artist" autocomplete="off" /></label><span class="selection-count" id="selection-count">0 selected</span></div>
-          <div class="chart-list" id="chart-list"><div class="chart-empty">Load the current chart to start choosing.</div></div>
-          <div class="chart-footer"><span class="chart-note">Selections are saved with today&apos;s chart snapshot.</span><button class="primary-button save-button" id="save-selection-button" type="button" disabled><span>Save selected</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" /></svg></button></div>
         </section>
       </main>
-
-      <footer class="footer"><span>MADE FOR THE SONGS THAT STAY WITH YOU.</span><span id="connection-status" role="status">CHECKING DATABASE</span></footer>
+      <footer class="footer"><span>CHARTROOM / SNAPSHOTS, NOT GUESSES</span><span id="connection-status" role="status">CONNECTING</span></footer>
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </div>
   </body>

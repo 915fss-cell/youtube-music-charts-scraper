@@ -1,4 +1,4 @@
-const state = { tracked: [], chart: [], selected: new Set() }
+const state = { user: null, markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, snapshotSignature: '', pollTimer: null, authMode: 'sign-in' }
 const byId = (id) => document.getElementById(id)
 const toast = byId('toast')
 let toastTimer
@@ -17,180 +17,467 @@ function showToast(message) {
 async function request(path, options = {}) {
   const response = await fetch(path, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    credentials: 'same-origin',
+    headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers },
   })
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.detail || 'Something went wrong. Please try again.')
+  if (!response.ok) throw new Error(body.detail || body.message || 'Something went wrong. Please try again.')
   return body
 }
 
-function imageMarkup(source, title, className = 'song-thumb') {
-  return source
-    ? `<img class="${className}" src="${escapeHtml(source)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
-    : `<span class="song-thumb-fallback" aria-hidden="true">♫</span>`
+function localDate(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
-function formatViews(value) {
-  if (value == null || value === '' || !Number.isFinite(Number(value))) return '—'
-  return `${new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value))} views`
+function lastChartFriday() {
+  const value = new Date()
+  const daysSinceFriday = (value.getDay() + 2) % 7
+  value.setDate(value.getDate() - daysSinceFriday)
+  return localDate(value)
 }
 
-function renderTracked() {
-  const body = byId('tracked-body')
-  const totalSnapshots = state.tracked.reduce((total, item) => total + Number(item.snapshot_count || 0), 0)
-  const lastDate = state.tracked.map((item) => item.snapshot_date).filter(Boolean).sort().at(-1)
-  byId('tracked-count').textContent = String(state.tracked.length).padStart(2, '0')
-  byId('heading-count').textContent = String(state.tracked.length).padStart(2, '0')
-  byId('snapshot-count').textContent = totalSnapshots.toLocaleString()
-  byId('last-updated').textContent = lastDate ? new Date(`${lastDate}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Not yet'
+function setFormDates() {
+  const latest = lastChartFriday()
+  byId('start-date').value = latest
+  byId('end-date').value = latest
+  byId('filter-end').value = latest
+  const start = new Date(`${latest}T12:00:00`)
+  start.setDate(start.getDate() - 84)
+  byId('filter-start').value = localDate(start)
+}
 
-  if (!state.tracked.length) {
-    body.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13M9 8l12-2M5 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12-3a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" /></svg></div><strong>Your shortlist starts here.</strong><p>Explore popular music videos and save the ones you want to follow.</p></div></td></tr>'
-    return
+async function loadSession() {
+  try {
+    const response = await request('/api/session')
+    state.user = response.user
+    byId('auth-gate').hidden = true
+    byId('dashboard').hidden = false
+    byId('account-email').textContent = state.user.email || state.user.name || 'Signed in'
+    await loadWorkspace()
+  } catch (error) {
+    byId('dashboard').hidden = true
+    byId('auth-gate').hidden = false
   }
-
-  body.innerHTML = state.tracked.map((item) => {
-    const artists = Array.isArray(item.artists) ? item.artists.join(', ') : ''
-    const chartPosition = item.rank == null ? '—' : `#${escapeHtml(item.rank)}`
-    const trackedDays = item.snapshot_count ? `${escapeHtml(item.snapshot_count)} days` : '—'
-    return `<tr>
-      <td><div class="song-cell">${imageMarkup(item.thumbnail_url, item.title)}<div><div class="song-title">${escapeHtml(item.title)}</div><div class="song-artists">${escapeHtml(artists)}</div></div></div></td>
-      <td><span class="rank-chip">${chartPosition}</span></td>
-      <td><span class="views-value">${escapeHtml(formatViews(item.weekly_views))}</span></td>
-      <td><span class="snapshot-chip">${trackedDays}</span></td>
-      <td><div class="row-actions"><button class="remove-button" type="button" data-remove="${Number(item.id)}" aria-label="Remove ${escapeHtml(item.title)} from tracked picks" title="Remove from tracked picks">×</button></div></td>
-    </tr>`
-  }).join('')
-
-  body.querySelectorAll('[data-remove]').forEach((button) => button.addEventListener('click', () => removeTracked(button.dataset.remove)))
 }
 
-function renderChart() {
-  const query = byId('chart-search').value.trim().toLocaleLowerCase()
-  const trackedUrls = new Set(state.tracked.map((item) => item.video_url))
-  const items = state.chart.filter((item) => `${item.title} ${item.artists.join(' ')}`.toLocaleLowerCase().includes(query))
-  byId('chart-subtitle').textContent = state.chart.length ? `${state.chart.length} popular music videos in the US. Select any you want to track.` : 'Choose the videos you want to follow.'
-  byId('selection-count').textContent = `${state.selected.size} selected`
-  byId('save-selection-button').disabled = state.selected.size === 0
+function renderAuthMode() {
+  const signUp = state.authMode === 'sign-up'
+  byId('auth-title').textContent = signUp ? 'Start your archive.' : 'Welcome back.'
+  byId('auth-password').autocomplete = signUp ? 'new-password' : 'current-password'
+  byId('auth-submit').innerHTML = `${signUp ? 'Create account' : 'Sign in'} <span aria-hidden="true">↗</span>`
+  byId('auth-toggle').textContent = signUp ? 'Already have an account? Sign in' : 'New here? Create an account'
+}
 
-  if (!items.length) {
-    byId('chart-list').innerHTML = `<div class="chart-empty">${state.chart.length ? 'No videos match that search.' : 'Load popular music videos to start choosing.'}</div>`
-    return
-  }
-
-  byId('chart-list').innerHTML = items.map((item, index) => {
-    const tracked = trackedUrls.has(item.url)
-    const checked = state.selected.has(item.url)
-    return `<label class="chart-row">
-      <input type="checkbox" data-select="${escapeHtml(item.url)}" ${checked ? 'checked' : ''} ${tracked ? 'disabled' : ''} aria-label="Select ${escapeHtml(item.title)}" />
-      <span class="chart-rank">${escapeHtml(item.rank || index + 1)}</span>
-      ${imageMarkup(item.thumbnail, item.title)}
-      <span><span class="song-title">${escapeHtml(item.title)}</span><span class="song-artists">${escapeHtml(item.artists.join(', '))}</span></span>
-      ${tracked ? '<span class="already-tracked">TRACKING</span>' : `<span class="chart-row-meta">${escapeHtml(formatViews(item.metrics?.view_count))}</span>`}
-    </label>`
-  }).join('')
-
-  byId('chart-list').querySelectorAll('[data-select]').forEach((checkbox) => {
-    checkbox.addEventListener('change', () => {
-      if (checkbox.checked) state.selected.add(checkbox.dataset.select)
-      else state.selected.delete(checkbox.dataset.select)
-      byId('selection-count').textContent = `${state.selected.size} selected`
-      byId('save-selection-button').disabled = state.selected.size === 0
+async function submitAuth(event) {
+  event.preventDefault()
+  const button = byId('auth-submit')
+  const errorNode = byId('auth-error')
+  errorNode.hidden = true
+  button.disabled = true
+  const form = new FormData(event.currentTarget)
+  const payload = { email: String(form.get('email') || '').trim(), password: String(form.get('password') || '') }
+  if (state.authMode === 'sign-up') payload.name = payload.email.split('@')[0]
+  try {
+    const response = await fetch(`/api/auth/${state.authMode === 'sign-up' ? 'sign-up/email' : 'sign-in/email'}`, {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     })
+    const body = await response.json().catch(() => ({}))
+    if (!response.ok || body.error) throw new Error(body.message || body.error?.message || 'Authentication failed. Check your email and password.')
+    event.currentTarget.reset()
+    await loadSession()
+    if (!state.user) throw new Error('Your account could not be signed in. Please try again.')
+  } catch (error) {
+    errorNode.textContent = error.message
+    errorNode.hidden = false
+  } finally {
+    button.disabled = false
+  }
+}
+
+function renderMarkets() {
+  const allMarkets = state.markets
+  byId('market-options').innerHTML = allMarkets.map((market) => `
+    <label class="market-option" title="${escapeHtml(market.name)}">
+      <input type="checkbox" name="market" value="${escapeHtml(market.code)}" ${market.code === 'US' ? 'checked' : ''} />
+      <span>${escapeHtml(market.code === 'global' ? 'Global' : market.code)}</span>
+    </label>`).join('')
+  byId('filter-market').insertAdjacentHTML('beforeend', allMarkets.map((market) => `<option value="${escapeHtml(market.code)}">${escapeHtml(market.name)}</option>`).join(''))
+  byId('market-options').addEventListener('change', (event) => {
+    const changed = event.target
+    if (changed.value === 'global' && changed.checked) {
+      byId('market-options').querySelectorAll('input').forEach((input) => { if (input !== changed) input.checked = false })
+    } else if (changed.checked) {
+      const global = byId('market-options').querySelector('input[value="global"]')
+      if (global) global.checked = false
+    }
+    updateMarketCount()
   })
+  updateMarketCount()
 }
 
-async function loadTracked() {
+function selectedMarkets() {
+  return [...byId('market-options').querySelectorAll('input:checked')].map((input) => input.value)
+}
+
+function updateMarketCount() {
+  const count = selectedMarkets().length
+  byId('market-count').textContent = `${count} selected`
+  byId('start-job-button').disabled = count === 0
+}
+
+function renderEntities() {
+  const select = byId('filter-entity')
+  select.innerHTML = '<option value="">All entities</option>' + state.entities.map((entity, index) => {
+    const kind = entity.entity_type === 'all' ? 'Whole chart' : entity.entity_type
+    return `<option value="${index}">${escapeHtml(kind)} · ${escapeHtml(entity.entity_id)}</option>`
+  }).join('')
+}
+
+async function loadEntities() {
+  state.entities = await request('/api/entities')
+  renderEntities()
+}
+
+function renderSetups() {
+  const container = byId('setup-list')
+  if (!state.configurations.length) {
+    container.innerHTML = '<span class="muted">No saved setups yet.</span>'
+    return
+  }
+  container.innerHTML = state.configurations.map((config) => `<button class="setup-chip" type="button" data-setup="${escapeHtml(config.id)}">${escapeHtml(config.name)}</button>`).join('')
+  container.querySelectorAll('[data-setup]').forEach((button) => button.addEventListener('click', () => applyConfiguration(button.dataset.setup)))
+}
+
+function applyConfiguration(id) {
+  const config = state.configurations.find((item) => item.id === id)
+  if (!config) return
+  byId('chart-type').value = config.chart_type
+  byId('entity-type').value = config.entity_type
+  byId('entity-id').value = config.entity_type === 'all' ? '' : config.entity_id
+  byId('entity-field').hidden = config.entity_type === 'all'
+  byId('configuration-name').value = config.name
+  byId('market-options').querySelectorAll('input').forEach((input) => { input.checked = config.markets.includes(input.value) })
+  updateMarketCount()
+  showToast(`Loaded “${config.name}”.`)
+}
+
+async function loadConfigurations() {
+  state.configurations = await request('/api/configurations')
+  renderSetups()
+}
+
+function formatDate(value, options = { month: 'short', day: 'numeric', year: 'numeric' }) {
+  if (!value) return '—'
+  const date = new Date(`${value}T12:00:00`)
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat(undefined, options).format(date)
+}
+
+function formatCompact(value, suffix = '') {
+  if (value == null || value === '' || !Number.isFinite(Number(value))) return '—'
+  return `${new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value))}${suffix}`
+}
+
+function chartLabel(type) {
+  return ({ TopSongs: 'Top songs', TopMusicVideos: 'Top music videos', TopArtists: 'Top artists' })[type] || type
+}
+
+function statusLabel(status) {
+  return ({ queued: 'Queued', running: 'Collecting', paused: 'Paused', completed: 'Complete', partial: 'Partial', failed: 'Failed', pending: 'Pending', succeeded: 'Saved' })[status] || status
+}
+
+function renderJob(job) {
+  const finished = Number(job.succeeded_tasks || 0) + Number(job.failed_tasks || 0)
+  const total = Number(job.total_tasks || 0)
+  const percent = total ? Math.round(finished * 100 / total) : 0
+  const dateLabel = job.start_date === job.end_date ? formatDate(job.start_date) : `${formatDate(job.start_date)} – ${formatDate(job.end_date)}`
+  const actions = []
+  if (['queued', 'running'].includes(job.status)) actions.push(`<button class="button" data-job-action="pause" data-job-id="${escapeHtml(job.id)}" type="button">Pause</button>`)
+  if (job.status === 'paused') actions.push(`<button class="button" data-job-action="resume" data-job-id="${escapeHtml(job.id)}" type="button">Resume</button>`)
+  if (Number(job.failed_tasks) > 0) actions.push(`<button class="button" data-job-action="retry" data-job-id="${escapeHtml(job.id)}" type="button">Retry failed (${Number(job.failed_tasks)})</button>`)
+  if ((job.markets || []).length) actions.push(`<button class="button" data-job-action="toggle-markets" data-job-id="${escapeHtml(job.id)}" type="button">Retry selected markets</button>`)
+  actions.push(`<button class="button" data-job-action="tasks" data-job-id="${escapeHtml(job.id)}" type="button">${state.expandedJobs.has(job.id) ? 'Hide' : 'View'} task status</button>`)
+  const retryPicker = `<div class="retry-picker" data-retry-picker hidden><fieldset><legend>Choose markets to recollect</legend>${(job.markets || []).map((market) => `<label><input type="checkbox" value="${escapeHtml(market)}"><span>${escapeHtml(market)}</span></label>`).join('')}</fieldset><button class="button button-accent" data-job-action="retry-selected" data-job-id="${escapeHtml(job.id)}" type="button">Recollect selected markets</button></div>`
+  return `<article class="job-card" data-job-card="${escapeHtml(job.id)}">
+    <div class="job-top"><div><div class="job-name">${escapeHtml(job.configuration_name)} · ${escapeHtml(chartLabel(job.chart_type))}</div><div class="job-meta">${escapeHtml(dateLabel)} &nbsp;·&nbsp; ${escapeHtml((job.markets || []).join(', '))} &nbsp;·&nbsp; ${total} daily tasks</div></div><span class="job-status ${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span></div>
+    <div class="job-progress" role="progressbar" aria-label="Collection progress" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${finished}"><span style="width:${percent}%"></span></div>
+    <div class="job-counts"><span>${finished} / ${total} complete</span><span>${Number(job.succeeded_tasks || 0)} saved · ${Number(job.failed_tasks || 0)} failed · ${Number(job.remaining_tasks || 0)} pending</span></div>
+    <div class="job-actions">${actions.join('')}</div>
+    ${retryPicker}
+    <div class="task-list" data-task-list="${escapeHtml(job.id)}" ${state.expandedJobs.has(job.id) ? '' : 'hidden'}></div>
+  </article>`
+}
+
+function renderJobs() {
+  const container = byId('jobs-list')
+  if (!state.jobs.length) {
+    container.innerHTML = '<div class="empty-panel">Your collection queue is ready.<span>Start a job to see market-by-market progress here.</span></div>'
+    return
+  }
+  container.innerHTML = state.jobs.map(renderJob).join('')
+  container.querySelectorAll('[data-job-action]').forEach((button) => button.addEventListener('click', () => handleJobAction(button.dataset.jobId, button.dataset.jobAction)))
+  state.jobs.filter((job) => state.expandedJobs.has(job.id)).forEach((job) => loadJobTasks(job.id, 1))
+}
+
+async function loadJobTasks(id, page = 1, append = false) {
   try {
-    state.tracked = await request('/api/tracked')
-    renderTracked()
+    const job = await request(`/api/jobs/${encodeURIComponent(id)}?page=${page}&page_size=50`)
+    const target = document.querySelector(`[data-task-list="${CSS.escape(id)}"]`)
+    if (!target) return
+    target.querySelector('[data-task-more]')?.remove()
+    const rows = job.tasks.map((task) => `
+      <div class="task-item"><span>${escapeHtml(task.market)} · ${escapeHtml(formatDate(task.chart_date, { month: 'short', day: 'numeric' }))}</span><span class="task-status ${escapeHtml(task.status)}">${escapeHtml(statusLabel(task.status))}</span>
+      ${task.error_message ? `<span class="task-error">${escapeHtml(task.error_message)}</span>` : ''}</div>`).join('')
+    if (append) target.insertAdjacentHTML('beforeend', rows)
+    else target.innerHTML = rows
+    if (page * job.task_page_size < job.task_count) {
+      target.insertAdjacentHTML('beforeend', `<button class="task-load-more" data-task-more type="button">Show next 50 of ${job.task_count} market/day results</button>`)
+      target.querySelector('[data-task-more]').addEventListener('click', () => loadJobTasks(id, page + 1, true))
+    }
+  } catch (error) {
+    console.error('[v0] Could not load job tasks:', error.message)
+  }
+}
+
+async function handleJobAction(id, action) {
+  const card = document.querySelector(`[data-job-card="${CSS.escape(id)}"]`)
+  if (action === 'tasks') {
+    if (state.expandedJobs.has(id)) state.expandedJobs.delete(id)
+    else state.expandedJobs.add(id)
+    const list = card?.querySelector('[data-task-list]')
+    if (list) list.hidden = !state.expandedJobs.has(id)
+    const button = card?.querySelector('[data-job-action="tasks"]')
+    if (button) button.textContent = state.expandedJobs.has(id) ? 'Hide task status' : 'View task status'
+    if (state.expandedJobs.has(id)) await loadJobTasks(id, 1)
+    return
+  }
+  if (action === 'toggle-markets') {
+    const picker = card?.querySelector('[data-retry-picker]')
+    if (picker) picker.hidden = !picker.hidden
+    return
+  }
+  try {
+    if (action === 'retry') {
+      await request(`/api/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST', body: JSON.stringify({ mode: 'failed' }) })
+      showToast('Failed market/day tasks were requeued. Successful snapshots were left untouched.')
+    } else if (action === 'retry-selected') {
+      const markets = [...(card?.querySelectorAll('[data-retry-picker] input:checked') || [])].map((input) => input.value)
+      if (!markets.length) {
+        showToast('Select at least one market to retry.')
+        return
+      }
+      const response = await request(`/api/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST', body: JSON.stringify({ mode: 'selected', markets }) })
+      showToast(`${response.requeued} selected market/day tasks were requeued.`)
+    } else {
+      await request(`/api/jobs/${encodeURIComponent(id)}/${action}`, { method: 'POST' })
+      showToast(action === 'pause' ? 'Collection paused.' : 'Collection resumed.')
+    }
+    await loadJobs()
+  } catch (error) {
+    showToast(error.message)
+  }
+}
+
+async function loadJobs() {
+  state.jobs = await request('/api/jobs')
+  renderJobs()
+}
+
+async function loadSummary() {
+  const summary = await request('/api/summary')
+  byId('metric-entries').textContent = Number(summary.entries || 0).toLocaleString()
+  byId('metric-snapshots').textContent = Number(summary.snapshots || 0).toLocaleString()
+  byId('metric-jobs').textContent = Number(summary.active_jobs || 0).toLocaleString()
+  byId('metric-date').textContent = summary.latest_date ? formatDate(summary.latest_date, { month: 'short', day: 'numeric' }) : '—'
+  const signature = `${summary.entries}:${summary.snapshots}:${summary.latest_date || ''}:${summary.latest_snapshot_at || ''}`
+  if (state.snapshotSignature && state.snapshotSignature !== signature) {
+    await loadEntities()
+    state.page = 1
+    await loadEntries()
+  }
+  state.snapshotSignature = signature
+}
+
+function activeFilters() {
+  const filters = {
+    chart_type: byId('filter-chart').value,
+    market: byId('filter-market').value,
+    start_date: byId('filter-start').value,
+    end_date: byId('filter-end').value,
+  }
+  const selectedEntity = byId('filter-entity').value
+  if (selectedEntity !== '') {
+    const entity = state.entities[Number(selectedEntity)]
+    if (entity) {
+      filters.entity_type = entity.entity_type
+      filters.entity_id = entity.entity_id
+    }
+  }
+  return filters
+}
+
+function queryEntries() {
+  const params = new URLSearchParams({ page: String(state.page), page_size: String(state.pageSize) })
+  Object.entries(activeFilters()).forEach(([key, value]) => { if (value) params.set(key, value) })
+  return request(`/api/entries?${params.toString()}`)
+}
+
+function queryTrends() {
+  const params = new URLSearchParams()
+  Object.entries(activeFilters()).forEach(([key, value]) => { if (value) params.set(key, value) })
+  return request(`/api/trends?${params.toString()}`)
+}
+
+function renderEntries() {
+  const body = byId('entries-body')
+  if (!state.entries.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-cell">No saved entries match these filters. Run a collection to build your archive.</td></tr>'
+    return
+  }
+  body.innerHTML = state.entries.map((entry) => {
+    const rank = entry.rank == null ? '—' : `#${Number(entry.rank)}`
+    const rankChange = entry.rank_change == null ? '<span class="rank-change new">—</span>' : `<span class="rank-change ${Number(entry.rank_change) > 0 ? 'up' : Number(entry.rank_change) < 0 ? 'down' : 'flat'}">${Number(entry.rank_change) > 0 ? '↑ ' : Number(entry.rank_change) < 0 ? '↓ ' : ''}${Math.abs(Number(entry.rank_change))}</span>`
+    const viewChange = entry.view_change == null ? '<span class="view-change flat">—</span>' : `<span class="view-change ${Number(entry.view_change) > 0 ? 'up' : 'flat'}">${Number(entry.view_change) > 0 ? '+' : ''}${formatCompact(entry.view_change)}</span>`
+    const thumb = entry.video_id ? `https://i.ytimg.com/vi/${encodeURIComponent(entry.video_id)}/mqdefault.jpg` : ''
+    const subtitle = `${escapeHtml(chartLabel(entry.chart_type))} · ${escapeHtml(entry.market)}`
+    return `<tr data-entry-row><td><div class="week-market">${escapeHtml(formatDate(entry.snapshot_date, { month: 'short', day: 'numeric', year: '2-digit' }))}<br />${escapeHtml(entry.market)}</div></td><td><div class="entry-cell">${thumb ? `<img class="entry-thumb" src="${thumb}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '<span class="entry-thumb-fallback" aria-hidden="true">CHART</span>'}<div><div class="entry-title">${escapeHtml(entry.title)}</div><div class="entry-subtitle">${subtitle}</div></div></div></td><td><span class="rank-value">${rank}</span></td><td>${rankChange}</td><td><span class="views-value">${formatCompact(entry.view_count)}</span></td><td>${viewChange}</td></tr>`
+  }).join('')
+}
+
+function renderTrend() {
+  const chart = byId('trend-chart')
+  const points = state.trend.map((item) => ({ day: item.snapshot_date, rank: Number(item.average_rank) }))
+  byId('trend-caption').textContent = points.length ? `${points.length} saved chart week${points.length === 1 ? '' : 's'} · lower rank is closer to #1` : 'Collect snapshots to reveal a trend.'
+  byId('trend-range').textContent = points.length ? `${formatDate(points[0].day, { month: 'short', day: 'numeric' })} — ${formatDate(points.at(-1).day, { month: 'short', day: 'numeric' })}` : '—'
+  if (points.length < 2) {
+    chart.innerHTML = '<div class="trend-empty">Save at least two weekly snapshots to compare movement.</div>'
+    return
+  }
+  const width = 900
+  const height = 140
+  const margin = { left: 28, right: 15, top: 16, bottom: 22 }
+  const max = Math.max(...points.map((point) => point.rank))
+  const min = Math.min(...points.map((point) => point.rank))
+  const spread = Math.max(1, max - min)
+  const coords = points.map((point, index) => ({
+    ...point,
+    x: margin.left + index * (width - margin.left - margin.right) / (points.length - 1),
+    y: margin.top + (point.rank - min) * (height - margin.top - margin.bottom) / spread,
+  }))
+  const path = coords.map((point, index) => `${index ? 'L' : 'M'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ')
+  const circles = coords.map((point) => `<circle class="trend-point" cx="${point.x}" cy="${point.y}" r="3"><title>${escapeHtml(formatDate(point.day))}: average rank ${point.rank.toFixed(1)}</title></circle>`).join('')
+  const labels = [coords[0], coords.at(-1)].map((point) => `<text class="trend-label" x="${point.x}" y="${height - 4}" text-anchor="${point === coords[0] ? 'start' : 'end'}">${escapeHtml(formatDate(point.day, { month: 'short', day: 'numeric' }))}</text>`).join('')
+  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Average chart rank across ${points.length} saved weeks"><path class="trend-line" d="${path}" />${circles}${labels}</svg>`
+}
+
+async function loadEntries() {
+  byId('entries-body').innerHTML = '<tr><td colspan="6" class="loading-cell">Loading your archive…</td></tr>'
+  try {
+    const [response, trendResponse] = await Promise.all([queryEntries(), queryTrends()])
+    state.entries = response.items
+    state.trend = trendResponse.items
+    state.total = response.total
+    renderEntries()
+    renderTrend()
+    const first = state.total ? (state.page - 1) * state.pageSize + 1 : 0
+    const last = Math.min(state.page * state.pageSize, state.total)
+    byId('entry-count').textContent = state.total ? `${first}–${last} of ${Number(state.total).toLocaleString()} entries` : 'No saved entries'
+    const pages = Math.max(1, Math.ceil(state.total / state.pageSize))
+    byId('page-indicator').textContent = `Page ${state.page} of ${pages}`
+    byId('prev-page').disabled = state.page <= 1
+    byId('next-page').disabled = state.page >= pages
+  } catch (error) {
+    byId('entries-body').innerHTML = `<tr><td colspan="6" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
+  }
+}
+
+async function loadWorkspace() {
+  try {
+    state.markets = await request('/api/markets')
+    renderMarkets()
+    await loadEntities()
+    await Promise.all([loadSummary(), loadConfigurations(), loadJobs(), loadEntries()])
     byId('connection-status').textContent = 'DATABASE CONNECTED'
-    byId('connection-status').classList.remove('error')
+    byId('connection-status').style.color = 'var(--green)'
+    clearInterval(state.pollTimer)
+    state.pollTimer = setInterval(() => Promise.all([loadJobs(), loadSummary()]).catch(() => {}), 5000)
   } catch (error) {
-    byId('tracked-body').innerHTML = `<tr><td colspan="5" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
     byId('connection-status').textContent = 'DATABASE OFFLINE'
-    byId('connection-status').classList.add('error')
+    showToast(error.message)
   }
 }
 
-async function loadChart() {
-  const button = byId('load-chart-button')
-  const label = button.querySelector('span:nth-child(2)')
+async function startJob(event) {
+  event.preventDefault()
+  const errorNode = byId('job-error')
+  errorNode.hidden = true
+  const button = byId('start-job-button')
   button.disabled = true
-  label.textContent = 'Reading the chart…'
-  byId('chart-list').innerHTML = '<div class="chart-empty">Loading popular music videos from YouTube…</div>'
   try {
-    state.chart = await request('/api/chart')
-    state.selected.clear()
-    byId('chart-section').hidden = false
-    renderChart()
-    byId('chart-section').scrollIntoView({ behavior: 'smooth', block: 'start' })
-    if (!state.chart.length) showToast('The chart loaded without any entries. Try again shortly.')
+    const entityType = byId('entity-type').value
+    const payload = {
+      name: byId('configuration-name').value.trim() || 'Chart collection',
+      chart_type: byId('chart-type').value,
+      entity_type: entityType,
+      entity_id: entityType === 'all' ? 'all' : byId('entity-id').value.trim(),
+      markets: selectedMarkets(),
+      start_date: byId('start-date').value,
+      end_date: byId('end-date').value,
+      save_configuration: byId('save-configuration').checked,
+    }
+    const result = await request('/api/jobs', { method: 'POST', body: JSON.stringify(payload) })
+    showToast(`Collection started · ${result.total_tasks} market/week tasks queued.`)
+    await Promise.all([loadJobs(), loadSummary(), loadConfigurations()])
   } catch (error) {
-    byId('chart-list').innerHTML = `<div class="chart-empty">${escapeHtml(error.message)}</div>`
-    byId('chart-section').hidden = false
-    showToast(error.message)
+    errorNode.textContent = error.message
+    errorNode.hidden = false
   } finally {
-    button.disabled = false
-    label.textContent = 'Explore popular music videos'
+    button.disabled = selectedMarkets().length === 0
   }
 }
 
-async function saveSelection() {
-  const selected = state.chart.filter((item) => state.selected.has(item.url))
-  const button = byId('save-selection-button')
-  button.disabled = true
-  button.querySelector('span').textContent = 'Saving…'
+async function refreshJobs() {
   try {
-    const result = await request('/api/tracked', { method: 'POST', body: JSON.stringify({ items: selected }) })
-    showToast(`${result.saved} ${result.saved === 1 ? 'pick' : 'picks'} saved with today\'s snapshot.`)
-    state.selected.clear()
-    await loadTracked()
-    renderChart()
+    await Promise.all([loadJobs(), loadSummary(), loadEntities(), loadEntries()])
   } catch (error) {
     showToast(error.message)
+  }
+}
+
+async function signOut() {
+  try {
+    await request('/api/auth/sign-out', { method: 'POST', body: '{}' })
   } finally {
-    button.querySelector('span').textContent = 'Save selected'
-    button.disabled = state.selected.size === 0
+    clearInterval(state.pollTimer)
+    state.user = null
+    byId('dashboard').hidden = true
+    byId('auth-gate').hidden = false
+    byId('auth-form').reset()
   }
 }
 
-async function removeTracked(id) {
-  try {
-    await request(`/api/tracked/${encodeURIComponent(id)}`, { method: 'DELETE' })
-    state.tracked = state.tracked.filter((item) => String(item.id) !== String(id))
-    renderTracked()
-    renderChart()
-    showToast('Removed from your tracked picks.')
-  } catch (error) {
-    showToast(error.message)
-  }
-}
-
-async function refreshSnapshots() {
-  const button = byId('refresh-button')
-  button.disabled = true
-  button.setAttribute('aria-busy', 'true')
-  try {
-    const result = await request('/api/refresh', { method: 'POST' })
-    await loadTracked()
-    showToast(result.updated ? `Updated ${result.updated} view ${result.updated === 1 ? 'snapshot' : 'snapshots'}.` : 'View counts refreshed. No tracked videos were found.')
-  } catch (error) {
-    showToast(error.message)
-  } finally {
-    button.disabled = false
-    button.removeAttribute('aria-busy')
-  }
-}
-
-byId('load-chart-button').addEventListener('click', loadChart)
-byId('open-chart-button').addEventListener('click', () => {
-  byId('chart-section').hidden = false
-  byId('chart-section').scrollIntoView({ behavior: 'smooth', block: 'start' })
-  if (!state.chart.length) loadChart()
+byId('auth-form').addEventListener('submit', submitAuth)
+byId('auth-toggle').addEventListener('click', () => {
+  state.authMode = state.authMode === 'sign-in' ? 'sign-up' : 'sign-in'
+  byId('auth-error').hidden = true
+  renderAuthMode()
 })
-byId('close-chart-button').addEventListener('click', () => { byId('chart-section').hidden = true })
-byId('save-selection-button').addEventListener('click', saveSelection)
-byId('refresh-button').addEventListener('click', refreshSnapshots)
-byId('chart-search').addEventListener('input', renderChart)
-loadTracked()
+byId('signout-button').addEventListener('click', signOut)
+byId('job-form').addEventListener('submit', startJob)
+byId('entity-type').addEventListener('change', () => {
+  byId('entity-field').hidden = byId('entity-type').value === 'all'
+  byId('entity-id').required = byId('entity-type').value !== 'all'
+})
+byId('filter-form').addEventListener('submit', (event) => { event.preventDefault(); state.page = 1; loadEntries() })
+byId('prev-page').addEventListener('click', () => { state.page = Math.max(1, state.page - 1); loadEntries() })
+byId('next-page').addEventListener('click', () => { state.page += 1; loadEntries() })
+byId('refresh-jobs').addEventListener('click', refreshJobs)
+byId('refresh-configurations').addEventListener('click', () => loadConfigurations().catch((error) => showToast(error.message)))
+byId('start-date').addEventListener('change', () => { if (!byId('end-date').value || byId('end-date').value < byId('start-date').value) byId('end-date').value = byId('start-date').value })
+byId('save-configuration').addEventListener('change', (event) => { byId('configuration-name').disabled = !event.currentTarget.checked })
+
+setFormDates()
+renderAuthMode()
+loadSession()
