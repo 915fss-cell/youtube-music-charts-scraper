@@ -30,6 +30,11 @@ function imageMarkup(source, title, className = 'song-thumb') {
     : `<span class="song-thumb-fallback" aria-hidden="true">♫</span>`
 }
 
+function formatViews(value) {
+  if (value == null || value === '' || !Number.isFinite(Number(value))) return '—'
+  return `${new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value))} views`
+}
+
 function renderTracked() {
   const body = byId('tracked-body')
   const totalSnapshots = state.tracked.reduce((total, item) => total + Number(item.snapshot_count || 0), 0)
@@ -40,19 +45,19 @@ function renderTracked() {
   byId('last-updated').textContent = lastDate ? new Date(`${lastDate}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Not yet'
 
   if (!state.tracked.length) {
-    body.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13M9 8l12-2M5 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12-3a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" /></svg></div><strong>Your shortlist starts here.</strong><p>Explore the latest chart and save the songs you want to follow.</p></div></td></tr>'
+    body.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13M9 8l12-2M5 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12-3a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" /></svg></div><strong>Your shortlist starts here.</strong><p>Explore popular music videos and save the ones you want to follow.</p></div></td></tr>'
     return
   }
 
   body.innerHTML = state.tracked.map((item) => {
     const artists = Array.isArray(item.artists) ? item.artists.join(', ') : ''
     const chartPosition = item.rank == null ? '—' : `#${escapeHtml(item.rank)}`
-    const weeks = item.weeks_on_chart ? `${escapeHtml(item.weeks_on_chart)} weeks` : '—'
+    const trackedDays = item.snapshot_count ? `${escapeHtml(item.snapshot_count)} days` : '—'
     return `<tr>
       <td><div class="song-cell">${imageMarkup(item.thumbnail_url, item.title)}<div><div class="song-title">${escapeHtml(item.title)}</div><div class="song-artists">${escapeHtml(artists)}</div></div></div></td>
       <td><span class="rank-chip">${chartPosition}</span></td>
-      <td><span class="views-value">${escapeHtml(item.weekly_views || '—')}</span></td>
-      <td><span class="snapshot-chip">${weeks}</span></td>
+      <td><span class="views-value">${escapeHtml(formatViews(item.weekly_views))}</span></td>
+      <td><span class="snapshot-chip">${trackedDays}</span></td>
       <td><div class="row-actions"><button class="remove-button" type="button" data-remove="${Number(item.id)}" aria-label="Remove ${escapeHtml(item.title)} from tracked picks" title="Remove from tracked picks">×</button></div></td>
     </tr>`
   }).join('')
@@ -64,12 +69,12 @@ function renderChart() {
   const query = byId('chart-search').value.trim().toLocaleLowerCase()
   const trackedUrls = new Set(state.tracked.map((item) => item.video_url))
   const items = state.chart.filter((item) => `${item.title} ${item.artists.join(' ')}`.toLocaleLowerCase().includes(query))
-  byId('chart-subtitle').textContent = state.chart.length ? `${state.chart.length} songs in the current global chart. Select any you want to track.` : 'Choose the songs you want to follow.'
+  byId('chart-subtitle').textContent = state.chart.length ? `${state.chart.length} popular music videos in the US. Select any you want to track.` : 'Choose the videos you want to follow.'
   byId('selection-count').textContent = `${state.selected.size} selected`
   byId('save-selection-button').disabled = state.selected.size === 0
 
   if (!items.length) {
-    byId('chart-list').innerHTML = `<div class="chart-empty">${state.chart.length ? 'No chart entries match that search.' : 'Load the current chart to start choosing.'}</div>`
+    byId('chart-list').innerHTML = `<div class="chart-empty">${state.chart.length ? 'No videos match that search.' : 'Load popular music videos to start choosing.'}</div>`
     return
   }
 
@@ -81,7 +86,7 @@ function renderChart() {
       <span class="chart-rank">${escapeHtml(item.rank || index + 1)}</span>
       ${imageMarkup(item.thumbnail, item.title)}
       <span><span class="song-title">${escapeHtml(item.title)}</span><span class="song-artists">${escapeHtml(item.artists.join(', '))}</span></span>
-      ${tracked ? '<span class="already-tracked">TRACKING</span>' : `<span class="chart-row-meta">${escapeHtml(item.metrics?.weekly_views || '')}</span>`}
+      ${tracked ? '<span class="already-tracked">TRACKING</span>' : `<span class="chart-row-meta">${escapeHtml(formatViews(item.metrics?.view_count))}</span>`}
     </label>`
   }).join('')
 
@@ -113,7 +118,7 @@ async function loadChart() {
   const label = button.querySelector('span:nth-child(2)')
   button.disabled = true
   label.textContent = 'Reading the chart…'
-  byId('chart-list').innerHTML = '<div class="chart-empty">Loading this week&apos;s YouTube Music chart…</div>'
+  byId('chart-list').innerHTML = '<div class="chart-empty">Loading popular music videos from YouTube…</div>'
   try {
     state.chart = await request('/api/chart')
     state.selected.clear()
@@ -127,7 +132,7 @@ async function loadChart() {
     showToast(error.message)
   } finally {
     button.disabled = false
-    label.textContent = 'Explore this week\'s chart'
+    label.textContent = 'Explore popular music videos'
   }
 }
 
@@ -169,7 +174,7 @@ async function refreshSnapshots() {
   try {
     const result = await request('/api/refresh', { method: 'POST' })
     await loadTracked()
-    showToast(result.updated ? `Updated ${result.updated} chart ${result.updated === 1 ? 'snapshot' : 'snapshots'}.` : 'Chart refreshed. No tracked picks appeared this week.')
+    showToast(result.updated ? `Updated ${result.updated} view ${result.updated === 1 ? 'snapshot' : 'snapshots'}.` : 'View counts refreshed. No tracked videos were found.')
   } catch (error) {
     showToast(error.message)
   } finally {
