@@ -72,14 +72,25 @@ def call_neon_auth(path: str, method: str, cookie: str = "", body: bytes | None 
 
 
 def ensure_same_origin(request: Request) -> None:
+    fetch_site = request.headers.get("sec-fetch-site", "").casefold()
+    if fetch_site == "cross-site":
+        raise HTTPException(status_code=403, detail="Cross-origin request rejected")
+
     origin = request.headers.get("origin")
-    if origin:
-        parsed_origin = urlsplit(origin)
-        host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
-        host = host.split(",", 1)[0].strip().casefold()
-        if parsed_origin.scheme not in {"http", "https"} or not host or parsed_origin.netloc.casefold() != host:
-            raise HTTPException(status_code=403, detail="Cross-origin request rejected")
-    elif request.headers.get("sec-fetch-site", "").casefold() == "cross-site":
+    if not origin:
+        return
+
+    parsed_origin = urlsplit(origin)
+    if parsed_origin.scheme not in {"http", "https"} or not parsed_origin.netloc:
+        raise HTTPException(status_code=403, detail="Cross-origin request rejected")
+
+    # Browser fetch metadata survives the preview proxy even when it rewrites Host.
+    if fetch_site == "same-origin":
+        return
+
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+    host = host.split(",", 1)[0].strip().casefold()
+    if not host or parsed_origin.netloc.casefold() != host:
         raise HTTPException(status_code=403, detail="Cross-origin request rejected")
 
 
