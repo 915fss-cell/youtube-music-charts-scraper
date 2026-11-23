@@ -74,7 +74,7 @@ function renderAuthMode() {
 function authErrorMessage(body, mode, status) {
   const error = body.error
   const code = body.code || (typeof error === 'object' ? error.code : '') || ''
-  const message = body.message || (typeof error === 'object' ? error.message : '') || (typeof error === 'string' ? error : '')
+  const message = body.message || body.detail || (typeof error === 'object' ? error.message : '') || (typeof error === 'string' ? error : '')
 
   if (code === 'USER_ALREADY_EXISTS' || code === 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL') {
     return 'An account already exists for this email. Choose “Already have an account? Sign in” below.'
