@@ -1,4 +1,4 @@
-const state = { user: null, markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, snapshotSignature: '', pollTimer: null, authMode: 'sign-in' }
+const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, snapshotSignature: '', pollTimer: null }
 const byId = (id) => document.getElementById(id)
 const toast = byId('toast')
 let toastTimer
@@ -47,71 +47,6 @@ function setFormDates() {
   const start = new Date(`${latest}T12:00:00`)
   start.setDate(start.getDate() - 84)
   byId('filter-start').value = localDate(start)
-}
-
-async function loadSession() {
-  try {
-    const response = await request('/api/session')
-    state.user = response.user
-    byId('auth-gate').hidden = true
-    byId('dashboard').hidden = false
-    byId('account-email').textContent = state.user.email || state.user.name || 'Signed in'
-    await loadWorkspace()
-  } catch (error) {
-    byId('dashboard').hidden = true
-    byId('auth-gate').hidden = false
-  }
-}
-
-function renderAuthMode() {
-  const signUp = state.authMode === 'sign-up'
-  byId('auth-title').textContent = signUp ? 'Start your archive.' : 'Welcome back.'
-  byId('auth-password').autocomplete = signUp ? 'new-password' : 'current-password'
-  byId('auth-submit').innerHTML = `${signUp ? 'Create account' : 'Sign in'} <span aria-hidden="true">↗</span>`
-  byId('auth-toggle').textContent = signUp ? 'Already have an account? Sign in' : 'New here? Create an account'
-}
-
-function authErrorMessage(body, mode, status) {
-  const error = body.error
-  const code = body.code || (typeof error === 'object' ? error.code : '') || ''
-  const message = body.message || body.detail || (typeof error === 'object' ? error.message : '') || (typeof error === 'string' ? error : '')
-
-  if (code === 'USER_ALREADY_EXISTS' || code === 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL') {
-    return 'An account already exists for this email. Choose “Already have an account? Sign in” below.'
-  }
-  if (code === 'INVALID_EMAIL_OR_PASSWORD') return 'Email or password is incorrect. Check your details and try again.'
-  if (message) return message
-  if (code) return `Account ${mode === 'sign-up' ? 'creation' : 'sign-in'} failed (${code}). Please try again.`
-  if (status) return `Account ${mode === 'sign-up' ? 'creation' : 'sign-in'} failed (HTTP ${status}). Please try again.`
-  return mode === 'sign-up'
-    ? 'Could not create your account. Check your email and password, or sign in if you already registered.'
-    : 'Could not sign in. Check your email and password, then try again.'
-}
-
-async function submitAuth(event) {
-  event.preventDefault()
-  const button = byId('auth-submit')
-  const errorNode = byId('auth-error')
-  errorNode.hidden = true
-  button.disabled = true
-  const form = new FormData(event.currentTarget)
-  const payload = { email: String(form.get('email') || '').trim(), password: String(form.get('password') || '') }
-  if (state.authMode === 'sign-up') payload.name = payload.email.split('@')[0]
-  try {
-    const response = await fetch(`/api/auth/${state.authMode === 'sign-up' ? 'sign-up/email' : 'sign-in/email'}`, {
-      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-    })
-    const body = await response.json().catch(() => ({}))
-    if (!response.ok || body.error) throw new Error(authErrorMessage(body, state.authMode, response.status))
-    event.currentTarget.reset()
-    await loadSession()
-    if (!state.user) throw new Error('Your account could not be signed in. Please try again.')
-  } catch (error) {
-    errorNode.textContent = error.message || authErrorMessage({}, state.authMode, 0)
-    errorNode.hidden = false
-  } finally {
-    button.disabled = false
-  }
 }
 
 function renderMarkets() {
@@ -230,7 +165,7 @@ function renderJob(job) {
 function renderJobs() {
   const container = byId('jobs-list')
   if (!state.jobs.length) {
-    container.innerHTML = '<div class="empty-panel">Your collection queue is ready.<span>Start a job to see market-by-market progress here.</span></div>'
+    container.innerHTML = '<div class="empty-panel">The shared collection queue is ready.<span>Start a job to see market-by-market progress here.</span></div>'
     return
   }
   container.innerHTML = state.jobs.map(renderJob).join('')
@@ -350,7 +285,7 @@ function queryTrends() {
 function renderEntries() {
   const body = byId('entries-body')
   if (!state.entries.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty-cell">No saved entries match these filters. Run a collection to build your archive.</td></tr>'
+    body.innerHTML = '<tr><td colspan="6" class="empty-cell">No saved entries match these filters. Run a collection to build the shared archive.</td></tr>'
     return
   }
   body.innerHTML = state.entries.map((entry) => {
@@ -390,7 +325,7 @@ function renderTrend() {
 }
 
 async function loadEntries() {
-  byId('entries-body').innerHTML = '<tr><td colspan="6" class="loading-cell">Loading your archive…</td></tr>'
+  byId('entries-body').innerHTML = '<tr><td colspan="6" class="loading-cell">Loading the shared archive…</td></tr>'
   try {
     const [response, trendResponse] = await Promise.all([queryEntries(), queryTrends()])
     state.entries = response.items
@@ -463,25 +398,6 @@ async function refreshJobs() {
   }
 }
 
-async function signOut() {
-  try {
-    await request('/api/auth/sign-out', { method: 'POST', body: '{}' })
-  } finally {
-    clearInterval(state.pollTimer)
-    state.user = null
-    byId('dashboard').hidden = true
-    byId('auth-gate').hidden = false
-    byId('auth-form').reset()
-  }
-}
-
-byId('auth-form').addEventListener('submit', submitAuth)
-byId('auth-toggle').addEventListener('click', () => {
-  state.authMode = state.authMode === 'sign-in' ? 'sign-up' : 'sign-in'
-  byId('auth-error').hidden = true
-  renderAuthMode()
-})
-byId('signout-button').addEventListener('click', signOut)
 byId('job-form').addEventListener('submit', startJob)
 byId('entity-type').addEventListener('change', () => {
   byId('entity-field').hidden = byId('entity-type').value === 'all'
@@ -496,5 +412,4 @@ byId('start-date').addEventListener('change', () => { if (!byId('end-date').valu
 byId('save-configuration').addEventListener('change', (event) => { byId('configuration-name').disabled = !event.currentTarget.checked })
 
 setFormDates()
-renderAuthMode()
-loadSession()
+loadWorkspace()

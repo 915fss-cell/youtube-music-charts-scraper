@@ -3,19 +3,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 from contextlib import asynccontextmanager, suppress
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
-from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit
-from urllib.request import Request as UrlRequest, urlopen
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import asyncpg
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -34,6 +31,8 @@ MARKETS = {
 }
 WORKER_INTERVAL_SECONDS = 5
 MAX_JOB_DAYS = 365
+MAX_ACTIVE_TASKS = 5_000
+PUBLIC_USER_ID = "public"
 pool: asyncpg.Pool | None = None
 worker_task: asyncio.Task | None = None
 
@@ -44,70 +43,31 @@ def require_pool() -> asyncpg.Pool:
     return pool
 
 
-def auth_base_url() -> str:
-    value = os.environ.get("NEON_AUTH_BASE_URL", "").strip().rstrip("/")
-    if not value:
-        raise HTTPException(status_code=503, detail="Neon Auth is not configured")
-    return value
-
-
-def call_neon_auth(path: str, method: str, cookie: str = "", body: bytes | None = None):
-    base_url = auth_base_url()
-    safe_path = "/".join(quote(part, safe="-._~") for part in path.split("/"))
-    endpoint = f"{base_url}/{safe_path}"
-    auth_origin = f"{urlsplit(base_url).scheme}://{urlsplit(base_url).netloc}"
-    headers = {"Accept": "application/json", "Origin": auth_origin}
-    if cookie:
-        headers["Cookie"] = cookie
-    if body is not None:
-        headers["Content-Type"] = "application/json"
-    request = UrlRequest(endpoint, data=body, headers=headers, method=method)
-    try:
-        with urlopen(request, timeout=15) as result:
-            return result.status, result.read(), result.headers.get_all("Set-Cookie", [])
-    except HTTPError as error:
-        return error.code, error.read(), error.headers.get_all("Set-Cookie", [])
-    except (URLError, TimeoutError, OSError) as error:
-        raise HTTPException(status_code=503, detail="Neon Auth is temporarily unavailable") from error
-
-
 def ensure_same_origin(request: Request) -> None:
+    fetch_site = request.headers.get("sec-fetch-site", "").casefold()
+    if fetch_site == "cross-site":
+        raise HTTPException(status_code=403, detail="Cross-origin request rejected")
+
     origin = request.headers.get("origin")
-    if origin:
-        parsed_origin = urlsplit(origin)
-        host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
-        host = host.split(",", 1)[0].strip().casefold()
-        if parsed_origin.scheme not in {"http", "https"} or not host or parsed_origin.netloc.casefold() != host:
-            raise HTTPException(status_code=403, detail="Cross-origin request rejected")
-    elif request.headers.get("sec-fetch-site", "").casefold() == "cross-site":
+    if not origin:
+        return
+
+    parsed_origin = urlsplit(origin)
+    if parsed_origin.scheme not in {"http", "https"} or not parsed_origin.netloc:
+        raise HTTPException(status_code=403, detail="Cross-origin request rejected")
+
+    # Browser fetch metadata survives the preview proxy even when it rewrites Host.
+    if fetch_site == "same-origin":
+        return
+
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+    host = host.split(",", 1)[0].strip().casefold()
+    if not host or parsed_origin.netloc.casefold() != host:
         raise HTTPException(status_code=403, detail="Cross-origin request rejected")
 
 
-def json_from_auth(body: bytes) -> dict:
-    try:
-        value = json.loads(body or b"{}")
-    except (json.JSONDecodeError, TypeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-async def get_current_user(request: Request) -> dict:
-    cookie = request.headers.get("cookie", "")
-    if not cookie:
-        raise HTTPException(status_code=401, detail="Sign in to access your chart data")
-    status, body, _ = await asyncio.to_thread(call_neon_auth, "get-session", "GET", cookie, None)
-    if status >= 500:
-        raise HTTPException(status_code=503, detail="Could not verify the current session")
-    payload = json_from_auth(body)
-    session_data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-    user = session_data.get("user") if isinstance(session_data, dict) else None
-    if not isinstance(user, dict) or not isinstance(user.get("id"), str):
-        raise HTTPException(status_code=401, detail="Your session has expired. Sign in again.")
-    return {"id": user["id"], "email": user.get("email", ""), "name": user.get("name", "")}
-
-
-def user_id(user: dict = Depends(get_current_user)) -> str:
-    return user["id"]
+def public_user_id() -> str:
+    return PUBLIC_USER_ID
 
 
 def parse_jsonb(value):
@@ -433,37 +393,6 @@ async def dashboard():
     return FileResponse(ROOT / "web" / "index.html")
 
 
-@app.api_route("/api/auth/{auth_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
-async def auth_proxy(auth_path: str, request: Request):
-    if any(part in {".", ".."} for part in auth_path.split("/")):
-        raise HTTPException(status_code=400, detail="Invalid auth endpoint")
-    if request.method not in {"GET"}:
-        ensure_same_origin(request)
-    body = await request.body()
-    status, response_body, cookies = await asyncio.to_thread(
-        call_neon_auth, auth_path, request.method, request.headers.get("cookie", ""), body or None
-    )
-    response = Response(content=response_body, status_code=status, media_type="application/json")
-    response.headers["Cache-Control"] = "no-store"
-    for cookie in cookies:
-        cookie = re.sub(r";\s*Domain=[^;]+", "", cookie, flags=re.IGNORECASE)
-        cookie = re.sub(r";\s*Path=[^;]+", "; Path=/", cookie, flags=re.IGNORECASE)
-        cookie = re.sub(r";\s*SameSite=[^;]+", "; SameSite=None", cookie, flags=re.IGNORECASE)
-        if not re.search(r";\s*path=", cookie, flags=re.IGNORECASE):
-            cookie += "; Path=/"
-        if not re.search(r";\s*samesite=", cookie, flags=re.IGNORECASE):
-            cookie += "; SameSite=None"
-        if not re.search(r";\s*secure(?:;|$)", cookie, flags=re.IGNORECASE):
-            cookie += "; Secure"
-        response.raw_headers.append((b"set-cookie", cookie.encode("latin-1")))
-    return response
-
-
-@app.get("/api/session")
-async def session_info(user: dict = Depends(get_current_user)):
-    return {"user": user}
-
-
 @app.get("/api/health")
 async def health():
     database = require_pool()
@@ -478,7 +407,7 @@ async def markets():
 
 
 @app.get("/api/configurations")
-async def list_configurations(current_user: str = Depends(user_id)):
+async def list_configurations(current_user: str = Depends(public_user_id)):
     database = require_pool()
     async with database.acquire() as connection:
         rows = await connection.fetch(
@@ -489,7 +418,7 @@ async def list_configurations(current_user: str = Depends(user_id)):
 
 
 @app.post("/api/configurations")
-async def save_configuration(configuration: ConfigurationInput, request: Request, current_user: str = Depends(user_id)):
+async def save_configuration(configuration: ConfigurationInput, request: Request, current_user: str = Depends(public_user_id)):
     ensure_same_origin(request)
     database = require_pool()
     async with database.acquire() as connection:
@@ -507,7 +436,7 @@ async def save_configuration(configuration: ConfigurationInput, request: Request
 
 
 @app.delete("/api/configurations/{configuration_id}")
-async def delete_configuration(configuration_id: UUID, request: Request, current_user: str = Depends(user_id)):
+async def delete_configuration(configuration_id: UUID, request: Request, current_user: str = Depends(public_user_id)):
     ensure_same_origin(request)
     database = require_pool()
     async with database.acquire() as connection:
@@ -520,7 +449,7 @@ async def delete_configuration(configuration_id: UUID, request: Request, current
 
 
 @app.post("/api/jobs")
-async def create_job(job: CreateJobInput, request: Request, current_user: str = Depends(user_id)):
+async def create_job(job: CreateJobInput, request: Request, current_user: str = Depends(public_user_id)):
     ensure_same_origin(request)
     database = require_pool()
     dates = []
@@ -533,6 +462,15 @@ async def create_job(job: CreateJobInput, request: Request, current_user: str = 
 
     async with database.acquire() as connection:
         async with connection.transaction():
+            await connection.execute("SELECT pg_advisory_xact_lock($1::bigint)", 28_349_719)
+            active_tasks = await connection.fetchval(
+                "SELECT COUNT(*) FROM collection_job_tasks WHERE user_id=$1 AND status IN ('pending','running')",
+                current_user,
+            )
+            requested_tasks = len(dates) * len(job.markets)
+            if active_tasks + requested_tasks > MAX_ACTIVE_TASKS:
+                raise HTTPException(status_code=429, detail="The shared collection queue is full. Try again when fewer collections are running.")
+
             configuration_id = None
             if job.save_configuration:
                 configuration = await connection.fetchrow(
@@ -564,7 +502,7 @@ async def create_job(job: CreateJobInput, request: Request, current_user: str = 
 
 
 @app.get("/api/jobs")
-async def list_jobs(current_user: str = Depends(user_id)):
+async def list_jobs(current_user: str = Depends(public_user_id)):
     database = require_pool()
     async with database.acquire() as connection:
         rows = await connection.fetch(
@@ -586,7 +524,7 @@ async def get_job(
     job_id: UUID,
     page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=50, ge=1, le=100),
-    current_user: str = Depends(user_id),
+    current_user: str = Depends(public_user_id),
 ):
     database = require_pool()
     async with database.acquire() as connection:
@@ -611,7 +549,7 @@ async def get_job(
 
 
 @app.post("/api/jobs/{job_id}/pause")
-async def pause_job(job_id: UUID, request: Request, current_user: str = Depends(user_id)):
+async def pause_job(job_id: UUID, request: Request, current_user: str = Depends(public_user_id)):
     ensure_same_origin(request)
     database = require_pool()
     async with database.acquire() as connection:
@@ -625,7 +563,7 @@ async def pause_job(job_id: UUID, request: Request, current_user: str = Depends(
 
 
 @app.post("/api/jobs/{job_id}/resume")
-async def resume_job(job_id: UUID, request: Request, current_user: str = Depends(user_id)):
+async def resume_job(job_id: UUID, request: Request, current_user: str = Depends(public_user_id)):
     ensure_same_origin(request)
     database = require_pool()
     async with database.acquire() as connection:
@@ -641,7 +579,7 @@ async def resume_job(job_id: UUID, request: Request, current_user: str = Depends
 
 
 @app.post("/api/jobs/{job_id}/retry")
-async def retry_job(job_id: UUID, selection: RetryInput, request: Request, current_user: str = Depends(user_id)):
+async def retry_job(job_id: UUID, selection: RetryInput, request: Request, current_user: str = Depends(public_user_id)):
     ensure_same_origin(request)
     database = require_pool()
     async with database.acquire() as connection:
@@ -675,7 +613,7 @@ async def retry_job(job_id: UUID, selection: RetryInput, request: Request, curre
 
 
 @app.get("/api/summary")
-async def summary(current_user: str = Depends(user_id)):
+async def summary(current_user: str = Depends(public_user_id)):
     database = require_pool()
     async with database.acquire() as connection:
         row = await connection.fetchrow(
@@ -691,7 +629,7 @@ async def summary(current_user: str = Depends(user_id)):
 
 
 @app.get("/api/entities")
-async def list_entities(current_user: str = Depends(user_id)):
+async def list_entities(current_user: str = Depends(public_user_id)):
     database = require_pool()
     async with database.acquire() as connection:
         rows = await connection.fetch(
@@ -709,7 +647,7 @@ async def chart_trends(
     entity_id: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
-    current_user: str = Depends(user_id),
+    current_user: str = Depends(public_user_id),
 ):
     if chart_type and chart_type not in CHART_TYPES:
         raise HTTPException(status_code=422, detail="Unsupported chart type")
@@ -748,7 +686,7 @@ async def browse_entries(
     end_date: date | None = None,
     page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=25, ge=1, le=100),
-    current_user: str = Depends(user_id),
+    current_user: str = Depends(public_user_id),
 ):
     if chart_type and chart_type not in CHART_TYPES:
         raise HTTPException(status_code=422, detail="Unsupported chart type")
