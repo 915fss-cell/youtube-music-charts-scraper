@@ -71,6 +71,23 @@ function renderAuthMode() {
   byId('auth-toggle').textContent = signUp ? 'Already have an account? Sign in' : 'New here? Create an account'
 }
 
+function authErrorMessage(body, mode, status) {
+  const error = body.error
+  const code = body.code || (typeof error === 'object' ? error.code : '') || ''
+  const message = body.message || body.detail || (typeof error === 'object' ? error.message : '') || (typeof error === 'string' ? error : '')
+
+  if (code === 'USER_ALREADY_EXISTS' || code === 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL') {
+    return 'An account already exists for this email. Choose “Already have an account? Sign in” below.'
+  }
+  if (code === 'INVALID_EMAIL_OR_PASSWORD') return 'Email or password is incorrect. Check your details and try again.'
+  if (message) return message
+  if (code) return `Account ${mode === 'sign-up' ? 'creation' : 'sign-in'} failed (${code}). Please try again.`
+  if (status) return `Account ${mode === 'sign-up' ? 'creation' : 'sign-in'} failed (HTTP ${status}). Please try again.`
+  return mode === 'sign-up'
+    ? 'Could not create your account. Check your email and password, or sign in if you already registered.'
+    : 'Could not sign in. Check your email and password, then try again.'
+}
+
 async function submitAuth(event) {
   event.preventDefault()
   const button = byId('auth-submit')
@@ -85,12 +102,12 @@ async function submitAuth(event) {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     })
     const body = await response.json().catch(() => ({}))
-    if (!response.ok || body.error) throw new Error(body.message || body.error?.message || 'Authentication failed. Check your email and password.')
+    if (!response.ok || body.error) throw new Error(authErrorMessage(body, state.authMode, response.status))
     event.currentTarget.reset()
     await loadSession()
     if (!state.user) throw new Error('Your account could not be signed in. Please try again.')
   } catch (error) {
-    errorNode.textContent = error.message
+    errorNode.textContent = error.message || authErrorMessage({}, state.authMode, 0)
     errorNode.hidden = false
   } finally {
     button.disabled = false

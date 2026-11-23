@@ -74,8 +74,10 @@ def call_neon_auth(path: str, method: str, cookie: str = "", body: bytes | None 
 def ensure_same_origin(request: Request) -> None:
     origin = request.headers.get("origin")
     if origin:
-        host = request.headers.get("host", "").casefold()
-        if not host or urlsplit(origin).netloc.casefold() != host:
+        parsed_origin = urlsplit(origin)
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+        host = host.split(",", 1)[0].strip().casefold()
+        if parsed_origin.scheme not in {"http", "https"} or not host or parsed_origin.netloc.casefold() != host:
             raise HTTPException(status_code=403, detail="Cross-origin request rejected")
     elif request.headers.get("sec-fetch-site", "").casefold() == "cross-site":
         raise HTTPException(status_code=403, detail="Cross-origin request rejected")
