@@ -9,12 +9,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/assets/styles.css?v=20261125-pages" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20261125-regional-chart-tabs" />
     <script>
       window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
     </script>
     <script defer src="/_vercel/insights/script.js"></script>
-    <script src="/assets/app.js?v=20261125-official-charts2" defer></script>
+    <script src="/assets/app.js?v=20261125-regional-chart-tabs" defer></script>
   </head>
   <body>
     <div class="app-shell" id="dashboard">
@@ -91,19 +91,31 @@
             <form class="playlist-form" id="playlist-form">
               <label class="field playlist-url-field"><span>YouTube playlist URLs or IDs · one per line</span><textarea id="playlist-input" name="playlist" maxlength="1000" rows="3" required autocomplete="url">youtube.com/playlist?list=PLJRJMLFc5iG8
 youtube.com/playlist?list=PLL3g3XPIkAE0</textarea></label>
-              <label class="field"><span>Chart</span><select id="live-chart"><option value="TopSongs">Songs</option><option value="TopMusicVideos">Music Videos</option><option value="TopArtists">Artists</option><option value="TopShortsSongs">Shorts Songs</option></select></label>
-              <label class="field"><span>Region</span><select id="live-market"><option value="US">United States</option></select></label>
-              <button class="button button-accent" id="playlist-submit" type="submit">Find charting videos <span aria-hidden="true">↗</span></button>
+              <button class="button button-accent" id="playlist-submit" type="submit">Find playlist matches <span aria-hidden="true">↗</span></button>
             </form>
             <p class="field-hint">Playlist videos are matched against saved chart snapshots. Add one public or unlisted playlist URL or ID per line.</p>
             <p class="form-error" id="playlist-error" role="alert" hidden></p>
           </section>
-          <section class="analysis-section live-results" aria-labelledby="live-results-title"><div class="section-heading"><div><p class="eyebrow">LATEST SAVED SNAPSHOT</p><h2 id="live-results-title">Playlist videos charting now</h2></div><span class="archive-badge" id="live-result-meta">AWAITING PLAYLIST</span></div><div class="table-wrap"><table><thead><tr><th scope="col">DATE / MARKET</th><th scope="col">VIDEO</th><th scope="col">RANK</th><th scope="col">WEEKLY VIEWS</th></tr></thead><tbody id="live-results-body"><tr><td colspan="4" class="empty-cell">Add a playlist to see its charting videos.</td></tr></tbody></table></div></section>
+          <div class="chart-tabs" role="tablist" aria-label="Chart categories">
+            <button class="chart-tab is-active" type="button" role="tab" id="live-tab-TopSongs" aria-controls="live-chart-panel" aria-selected="true" tabindex="0" data-chart-type="TopSongs">Songs</button>
+            <button class="chart-tab" type="button" role="tab" id="live-tab-TopMusicVideos" aria-controls="live-chart-panel" aria-selected="false" tabindex="-1" data-chart-type="TopMusicVideos">Music Videos</button>
+            <button class="chart-tab" type="button" role="tab" id="live-tab-TrendingVideos" aria-controls="live-chart-panel" aria-selected="false" tabindex="-1" data-chart-type="TrendingVideos">Trending Videos</button>
+            <button class="chart-tab" type="button" role="tab" id="live-tab-TopArtists" aria-controls="live-chart-panel" aria-selected="false" tabindex="-1" data-chart-type="TopArtists">Artists</button>
+            <button class="chart-tab" type="button" role="tab" id="live-tab-TopShortsSongs" aria-controls="live-chart-panel" aria-selected="false" tabindex="-1" data-chart-type="TopShortsSongs">Shorts Songs</button>
+          </div>
+          <section class="analysis-section live-results" id="live-chart-panel" role="tabpanel" aria-labelledby="live-tab-TopSongs" tabindex="0">
+            <div class="section-heading"><div><p class="eyebrow">LATEST SAVED CHARTS · ALL REGIONS</p><h2 id="live-chart-title">Songs playlist matches</h2><p class="section-subtitle">Each playlist video is grouped with its rank, weekly views, and rank movement in every region.</p></div><span class="archive-badge" id="live-chart-meta">AWAITING PLAYLIST</span></div>
+            <div class="video-results-list" id="live-video-results"><div class="empty-panel">Add your playlists to see charting videos.<span>Choose a chart tab to see every region where each video appears.</span></div></div>
+          </section>
         </section>
 
         <section class="page-view history-page" id="page-history" data-page-view="history" hidden>
           <section class="analysis-section" aria-labelledby="history-title">
             <div class="section-heading"><div><p class="eyebrow">03 / SAVED PLAYLIST MATCHES</p><h2 id="history-title">Charting history</h2><p class="section-subtitle">Every saved chart snapshot that matched a video in your playlist.</p></div><button class="button button-accent" id="load-history" type="button">Load playlist history</button></div>
+            <div class="history-filters">
+              <label class="field"><span>Chart</span><select id="history-chart"><option value="TopSongs">Songs</option><option value="TopMusicVideos">Music Videos</option><option value="TrendingVideos">Trending Videos</option><option value="TopArtists">Artists</option><option value="TopShortsSongs">Shorts Songs</option></select></label>
+              <label class="field"><span>Region</span><select id="history-market"></select></label>
+            </div>
             <div class="table-meta"><span id="history-count">Add a playlist in Live filter to start.</span><span id="history-page-indicator">Page 1</span></div>
             <div class="table-wrap"><table><thead><tr><th scope="col">DATE / MARKET</th><th scope="col">VIDEO</th><th scope="col">RANK</th><th scope="col">WEEKLY VIEWS</th></tr></thead><tbody id="history-body"><tr><td colspan="4" class="empty-cell">Your playlist chart history will appear here.</td></tr></tbody></table></div>
             <div class="pagination"><span id="history-range">—</span><div><button class="button button-quiet" id="history-prev" type="button" disabled>Previous</button><button class="button button-quiet" id="history-next" type="button" disabled>Next</button></div></div>
