@@ -1,4 +1,4 @@
-const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, explorerPage: 1, explorerPageSize: 100, explorerTotal: 0, liveChartCache: {}, snapshotSignature: '', pollTimer: null, playlistReference: '', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
+const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, explorerPage: 1, explorerPageSize: 100, explorerTotal: 0, snapshotSignature: '', pollTimer: null, playlistReference: '', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
 const byId = (id) => document.getElementById(id)
 const toast = byId('toast')
 let toastTimer
@@ -138,7 +138,7 @@ function formatCompact(value, suffix = '') {
 }
 
 function chartLabel(type) {
-  return ({ PopularMusicVideos: 'Popular music videos', TopSongs: 'Top songs', TopMusicVideos: 'Top music videos', TopArtists: 'Top artists' })[type] || type
+  return ({ TrendingVideos: 'Trending', TopMusicVideos: 'Music Videos', TopSongs: 'Songs', TopArtists: 'Artists', TopShortsSongs: 'Shorts Songs' })[type] || type
 }
 
 function statusLabel(status) {
@@ -371,14 +371,20 @@ function explorerQuery() {
   return params
 }
 
+function explorerHeadings(chart, live) {
+  if (live) return ['Rank', 'Status', 'Trending video', 'Artists', 'Release date']
+  if (chart === 'TopMusicVideos') return ['Rank', 'Movement', 'Music video', 'Yesterday', 'Days on chart']
+  if (chart === 'TopShortsSongs') return ['Rank', 'Movement', 'Shorts song', 'Yesterday', 'Days on chart']
+  return ['Rank', 'Movement', 'Chart entry', 'Weekly views', 'Previous', 'Weeks on chart', 'Release date']
+}
+
 function renderExplorerEntries(entries, live = false) {
   const body = byId('explorer-entries-body')
-  const headings = live
-    ? ['Rank', 'Source', 'Video', 'Views', 'Channel', 'Published', 'Category']
-    : ['Rank', 'Movement', 'Chart entry', 'Weekly views', 'Previous', 'Weeks on chart', 'Release date']
-  document.querySelectorAll('.explorer-table-wrap thead th').forEach((heading, index) => { heading.textContent = headings[index] })
+  const chart = byId('explorer-chart').value
+  const headings = explorerHeadings(chart, live)
+  document.querySelector('.explorer-table-wrap thead tr').innerHTML = headings.map((heading) => `<th scope="col">${escapeHtml(heading)}</th>`).join('')
   if (!entries.length) {
-    body.innerHTML = `<tr><td colspan="7" class="empty-cell">${live ? 'No matching videos in the current popular-music list.' : 'No snapshots saved yet. Choose Popular music videos · live to browse current data.'}</td></tr>`
+    body.innerHTML = `<tr><td colspan="${headings.length}" class="empty-cell">${live ? 'No videos are trending on the official chart right now.' : 'No snapshots saved yet. Select an official chart and start a collection below.'}</td></tr>`
     return
   }
   body.innerHTML = entries.map((entry) => {
@@ -390,55 +396,54 @@ function renderExplorerEntries(entries, live = false) {
         : `<span class="rank-change ${Number(entry.rank_change) > 0 ? 'up' : Number(entry.rank_change) < 0 ? 'down' : 'flat'}">${Number(entry.rank_change) > 0 ? '↑ ' : Number(entry.rank_change) < 0 ? '↓ ' : '='}${Number(entry.rank_change) ? Math.abs(Number(entry.rank_change)) : ''}</span>`
     const thumbnail = entry.video_id ? `https://i.ytimg.com/vi/${encodeURIComponent(entry.video_id)}/mqdefault.jpg` : ''
     const metrics = entry.metrics || {}
-    const previous = live ? escapeHtml(entry.channel_title || '—') : entry.previous_rank == null ? '—' : `#${Number(entry.previous_rank)}`
-    const weeks = live ? escapeHtml(entry.published_at?.slice(0, 10) || '—') : escapeHtml(metrics.weeks_on_chart || '—')
-    const release = live ? 'Music video' : escapeHtml(metrics.release_date || '—')
-    const subtitle = live ? entry.channel_title : (metrics.artists || []).join?.(', ') || chartLabel(entry.chart_type)
-    return `<tr><td class="explorer-rank">${rank}</td><td>${movement}</td><td><div class="entry-cell">${thumbnail ? `<img class="entry-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '<span class="entry-thumb-fallback" aria-hidden="true">YT</span>'}<div><div class="entry-title">${escapeHtml(entry.title)}</div><div class="entry-subtitle">${escapeHtml(subtitle || chartLabel(entry.chart_type))}</div></div></div></td><td><span class="views-value">${formatCompact(entry.view_count)}</span></td><td>${previous}</td><td>${weeks}</td><td>${release}</td></tr>`
+    const subtitle = (metrics.artists || []).join?.(', ') || chartLabel(entry.chart_type)
+    const entryCell = `<td><div class="entry-cell">${thumbnail ? `<img class="entry-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '<span class="entry-thumb-fallback" aria-hidden="true">YT</span>'}<div><div class="entry-title">${escapeHtml(entry.title)}</div><div class="entry-subtitle">${escapeHtml(subtitle)}</div></div></div></td>`
+    if (live) return `<tr><td class="explorer-rank">${rank}</td><td>${movement}</td>${entryCell}<td>${escapeHtml(metrics.release_date || '—')}</td></tr>`
+    if (chart === 'TopMusicVideos' || chart === 'TopShortsSongs') {
+      return `<tr><td class="explorer-rank">${rank}</td><td>${movement}</td>${entryCell}<td>${escapeHtml(metrics.yesterday_position || '—')}</td><td>${escapeHtml(metrics.days_on_chart || '—')}</td></tr>`
+    }
+    const previous = entry.previous_rank == null ? '—' : `#${Number(entry.previous_rank)}`
+    return `<tr><td class="explorer-rank">${rank}</td><td>${movement}</td>${entryCell}<td><span class="views-value">${formatCompact(entry.view_count)}</span></td><td>${previous}</td><td>${escapeHtml(metrics.weeks_on_chart || '—')}</td><td>${escapeHtml(metrics.release_date || '—')}</td></tr>`
   }).join('')
 }
 
 async function loadExplorer(forceRefresh = false) {
   const body = byId('explorer-entries-body')
   if (!body) return
-  body.innerHTML = '<tr><td colspan="7" class="loading-cell">Loading chart entries…</td></tr>'
   const selectedMarket = byId('explorer-market').value
   const market = state.markets.find((item) => item.code === selectedMarket)
   const chart = byId('explorer-chart').value
-  const live = chart === 'PopularMusicVideos'
-  byId('explorer-chart-title').textContent = `${chartLabel(chart)} · ${market?.name || selectedMarket}`
+  const live = chart === 'TrendingVideos'
+  const headings = explorerHeadings(chart, live)
+  body.innerHTML = `<tr><td colspan="${headings.length}" class="loading-cell">Loading chart entries…</td></tr>`
+  const marketName = market?.name || selectedMarket
+  byId('explorer-chart-title').textContent = `${chartLabel(chart)} · ${marketName}`
   byId('explorer-date').disabled = live
-  byId('load-chart').textContent = live ? 'Refresh live list' : 'Refresh results'
+  byId('explorer-date').closest('label').querySelector('span').textContent = live ? 'Date · live chart' : 'Date · saved snapshots only'
+  byId('explorer-date').setAttribute('aria-label', live ? 'Date unavailable for the live Trending chart' : 'Snapshot date (applies to saved snapshots)')
+  byId('explorer-query').disabled = live
+  byId('explorer-search-form').querySelector('button[type="submit"]').disabled = live
+  byId('explorer-query').placeholder = live ? 'Open the official chart to search current videos' : 'Type a song, video, or artist name'
+  byId('load-chart').textContent = live ? 'Open Trending' : 'Refresh results'
   byId('save-chart-history').disabled = live
-  byId('save-chart-history').textContent = live ? 'Live list · not saved' : 'Save snapshot'
-  byId('save-chart-history').title = live ? 'Live popular videos are not saved as chart snapshots.' : ''
-  byId('explorer-source-note').textContent = live
-    ? 'Live results use YouTube’s Most Popular Music category, not the official weekly YouTube Charts.'
-    : 'Saved snapshots are stored in this chart explorer.'
+  byId('save-chart-history').textContent = live ? 'Current chart · not saved' : 'Save snapshot'
+  byId('save-chart-history').title = live ? 'Trending is a live official chart and cannot be saved here.' : ''
+  const officialChartUrl = `https://charts.youtube.com/charts/TrendingVideos/${encodeURIComponent(selectedMarket.toLowerCase())}/RightNow`
+  byId('explorer-source-note').innerHTML = live
+    ? `Trending is hosted directly on YouTube Charts. <a href="${officialChartUrl}" target="_blank" rel="noopener noreferrer">Open official chart</a>`
+    : 'Browse saved snapshots collected from YouTube Charts.'
   try {
     if (live) {
       state.explorerPage = 1
-      if (selectedMarket === 'global') throw new Error('Choose a country market to load live YouTube data.')
-      const cached = state.liveChartCache[selectedMarket]
-      let result = cached && Date.now() - cached.cachedAt < 5 * 60 * 1000 ? cached.data : null
-      if (!result || forceRefresh) {
-        result = await request(`/api/live-music-videos?${new URLSearchParams({ market: selectedMarket })}`)
-        state.liveChartCache[selectedMarket] = { data: result, cachedAt: Date.now() }
-      }
-      const search = byId('explorer-query').value.trim().toLocaleLowerCase()
-      const entries = search
-        ? result.items.filter((entry) => `${entry.title} ${entry.channel_title}`.toLocaleLowerCase().includes(search))
-        : result.items
-      renderExplorerEntries(entries, true)
-      const refreshed = new Date(result.fetched_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
-      byId('explorer-date-label').textContent = `Live · refreshed ${refreshed}`
-      byId('explorer-meta').textContent = `${result.total} popular music videos · ${market?.name || selectedMarket}`
-      byId('explorer-count').textContent = search
-        ? `${entries.length} matching videos from ${result.total} live results.`
-        : `Showing ${entries.length} live YouTube popular-music videos.`
-      byId('explorer-page-indicator').textContent = 'Live list'
+      renderExplorerEntries([], true)
+      body.innerHTML = `<tr><td colspan="${headings.length}" class="empty-cell">Trending is a live official chart. Open YouTube Charts to see the current rankings.</td></tr>`
+      byId('explorer-date-label').textContent = 'Live official chart'
+      byId('explorer-meta').textContent = `Trending · ${marketName}`
+      byId('explorer-count').textContent = 'View current music videos from the official Trending chart.'
+      byId('explorer-page-indicator').textContent = 'Live chart'
       byId('explorer-prev').disabled = true
       byId('explorer-next').disabled = true
+      if (forceRefresh) window.open(officialChartUrl, '_blank', 'noopener,noreferrer')
       return
     }
 
@@ -447,14 +452,15 @@ async function loadExplorer(forceRefresh = false) {
     renderExplorerEntries(result.items)
     const date = result.items[0]?.snapshot_date || byId('explorer-date').value
     byId('explorer-date-label').textContent = date ? `${formatDate(date)} · Saved chart snapshot` : 'No saved snapshot yet'
-    byId('explorer-meta').textContent = `${Number(result.total).toLocaleString()} ${result.total === 1 ? 'entry' : 'entries'} · ${chart === 'TopArtists' ? 'artist chart' : 'weekly chart'}`
+    const frequency = chart === 'TopShortsSongs' || chart === 'TopMusicVideos' ? 'daily chart' : 'weekly chart'
+    byId('explorer-meta').textContent = `${Number(result.total).toLocaleString()} ${result.total === 1 ? 'entry' : 'entries'} · ${frequency}`
     byId('explorer-count').textContent = result.total ? `Showing ${(state.explorerPage - 1) * state.explorerPageSize + 1}–${Math.min(state.explorerPage * state.explorerPageSize, result.total)} of ${Number(result.total).toLocaleString()} chart entries.` : 'No saved entries for this chart yet.'
     const pages = Math.max(1, Math.ceil(result.total / state.explorerPageSize))
     byId('explorer-page-indicator').textContent = `Page ${state.explorerPage} of ${pages}`
     byId('explorer-prev').disabled = state.explorerPage <= 1
     byId('explorer-next').disabled = state.explorerPage >= pages
   } catch (error) {
-    body.innerHTML = `<tr><td colspan="7" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
+    body.innerHTML = `<tr><td colspan="${headings.length}" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
     byId('explorer-meta').textContent = 'Unable to load chart'
   }
 }
