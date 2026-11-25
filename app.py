@@ -754,42 +754,64 @@ async def browse_entries(
     return {"items": [row_dict(row) for row in rows], "total": total, "page": page, "page_size": page_size}
 
 
+def extract_playlist_id(reference: str) -> str:
+    candidate = reference.strip()
+    if not candidate:
+        raise HTTPException(status_code=422, detail="Enter a valid YouTube playlist URL or ID")
+    if "/" in candidate or "?" in candidate:
+        parsed = urlsplit(candidate if "://" in candidate else f"https://{candidate}")
+        playlist_id = parse_qs(parsed.query).get("list", [None])[0]
+    else:
+        playlist_id = candidate
+    if not playlist_id or len(playlist_id) > 200:
+        raise HTTPException(status_code=422, detail="Enter a valid YouTube playlist URL or ID")
+    return playlist_id
+
+
 def fetch_playlist_video_ids(playlist_reference: str) -> list[str]:
     api_key = os.environ.get("YOUTUBE_DATA_API_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="Playlist lookup is not configured yet")
-    parsed = urlsplit(playlist_reference)
-    playlist_id = parse_qs(parsed.query).get("list", [None])[0] if parsed.scheme or parsed.netloc else playlist_reference
-    if not playlist_id or len(playlist_id) > 200:
-        raise HTTPException(status_code=422, detail="Enter a valid YouTube playlist URL or ID")
+
+    playlist_ids = list(dict.fromkeys(
+        extract_playlist_id(reference)
+        for reference in playlist_reference.splitlines()
+        if reference.strip()
+    ))
+    if not playlist_ids:
+        raise HTTPException(status_code=422, detail="Enter at least one YouTube playlist URL or ID")
 
     video_ids: list[str] = []
-    page_token = None
     try:
-        while len(video_ids) < 1000:
-            params = {
-                "part": "contentDetails",
-                "maxResults": "50",
-                "playlistId": playlist_id,
-                "key": api_key,
-            }
-            if page_token:
-                params["pageToken"] = page_token
-            query = urlencode(params)
-            with urlopen(f"https://www.googleapis.com/youtube/v3/playlistItems?{query}", timeout=12) as response:
-                payload = json.loads(response.read())
-            video_ids.extend(
-                item.get("contentDetails", {}).get("videoId")
-                for item in payload.get("items", [])
-                if item.get("contentDetails", {}).get("videoId")
-            )
-            page_token = payload.get("nextPageToken")
-            if not page_token:
-                break
+        for playlist_id in playlist_ids:
+            page_token = None
+            playlist_video_count = 0
+            while playlist_video_count < 1000:
+                params = {
+                    "part": "contentDetails",
+                    "maxResults": "50",
+                    "playlistId": playlist_id,
+                    "key": api_key,
+                }
+                if page_token:
+                    params["pageToken"] = page_token
+                query = urlencode(params)
+                with urlopen(f"https://www.googleapis.com/youtube/v3/playlistItems?{query}", timeout=12) as response:
+                    payload = json.loads(response.read())
+                videos = [
+                    item.get("contentDetails", {}).get("videoId")
+                    for item in payload.get("items", [])
+                    if item.get("contentDetails", {}).get("videoId")
+                ]
+                video_ids.extend(videos)
+                playlist_video_count += len(videos)
+                page_token = payload.get("nextPageToken")
+                if not page_token:
+                    break
     except Exception as error:
         if isinstance(error, HTTPException):
             raise
-        raise HTTPException(status_code=422, detail="Could not read that playlist. Check the URL and make sure it is public or unlisted.") from error
+        raise HTTPException(status_code=422, detail="Could not read a playlist. Check each URL and make sure the playlists are public or unlisted.") from error
     return list(dict.fromkeys(video_ids))
 
 
@@ -841,7 +863,7 @@ async def playlist_chart_entries(
 @app.get("/api/live-filter")
 async def live_filter(
     request: Request,
-    playlist: str = Query(min_length=1, max_length=300),
+    playlist: str = Query(min_length=1, max_length=1000),
     chart_type: str = "TopSongs",
     market: str = "US",
 ):
@@ -852,7 +874,7 @@ async def live_filter(
 @app.get("/api/live-history")
 async def live_history(
     request: Request,
-    playlist: str = Query(min_length=1, max_length=300),
+    playlist: str = Query(min_length=1, max_length=1000),
     chart_type: str = "TopSongs",
     market: str = "US",
     page: int = Query(default=1, ge=1, le=100_000),
