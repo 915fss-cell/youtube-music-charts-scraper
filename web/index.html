@@ -26,20 +26,29 @@
 
       <main>
         <div class="page-view is-active" id="page-explorer" data-page-view="explorer">
-        <section class="hero">
-          <div class="hero-copy">
-            <p class="eyebrow">A CLEARER VIEW OF WHAT MOVES</p>
-            <h1>Chart<br /><span>explorer.</span></h1>
-            <p class="hero-description">Choose a chart, region, and date to explore the videos and artists charting that week.</p>
-          </div>
-          <div class="hero-aside" aria-label="Collection cadence">
-            <div class="orbit orbit-a"></div><div class="orbit orbit-b"></div>
-            <div class="orbit-core"><span class="core-wave"><i></i><i></i><i></i><i></i><i></i></span><span>WEEK<br />BY WEEK</span></div>
-            <span class="orbit-label label-top">3 CHART TYPES</span><span class="orbit-label label-bottom">21 MARKETS</span>
-          </div>
+        <section class="explorer-controls panel" aria-label="Chart explorer filters">
+          <label class="field"><span>Market</span><select id="explorer-market" aria-label="Market"></select></label>
+          <label class="field"><span>Chart</span><select id="explorer-chart"><option value="TopSongs">Top songs</option><option value="TopMusicVideos">Top music videos</option><option value="TopArtists">Top artists</option></select></label>
+          <label class="field explorer-date-field"><span>Date · blank uses latest</span><input id="explorer-date" type="date" min="2016-01-01" aria-label="Chart date (leave blank for latest)" /></label>
+          <button class="button button-accent explorer-load" id="load-chart" type="button">Load chart</button>
         </section>
 
-        <section class="metric-grid" aria-label="Collection overview">
+        <section class="explorer-section" aria-labelledby="explorer-title">
+          <div class="explorer-heading"><h1 id="explorer-title">Chart rankings</h1><span id="explorer-meta">Loading saved charts…</span></div>
+          <form class="explorer-search" id="explorer-search-form">
+            <label class="field"><span>Search songs, videos, or artists</span><input id="explorer-query" type="search" maxlength="120" placeholder="Type a song, video, or artist name" /></label>
+            <button class="button button-accent" type="submit">Search</button>
+          </form>
+          <p class="explorer-count" id="explorer-count" aria-live="polite">Choose a chart to browse its saved entries.</p>
+          <section class="explorer-table-card" aria-label="Chart ranking results">
+            <div class="explorer-table-heading"><strong id="explorer-chart-title">Top songs · United States</strong><span id="explorer-date-label">Latest saved snapshot</span></div>
+            <div class="explorer-table-tools"><span>Chart history is saved automatically as collection snapshots.</span><button class="button button-quiet" id="save-chart-history" type="button">Collect this chart</button></div>
+            <div class="table-wrap explorer-table-wrap"><table><thead><tr><th scope="col">Rank</th><th scope="col">Movement</th><th scope="col">Chart entry</th><th scope="col">Weekly views</th><th scope="col">Previous</th><th scope="col">Weeks on chart</th><th scope="col">Release date</th></tr></thead><tbody id="explorer-entries-body"><tr><td colspan="7" class="loading-cell">Loading chart entries…</td></tr></tbody></table></div>
+            <div class="pagination explorer-pagination"><span id="explorer-page-indicator">Page 1</span><div><button class="button button-quiet" id="explorer-prev" type="button" disabled>Previous</button><button class="button button-quiet" id="explorer-next" type="button" disabled>Next</button></div></div>
+          </section>
+        </section>
+
+        <section class="metric-grid explorer-overview" aria-label="Collection overview">
           <article class="metric-card metric-highlight"><span class="metric-label">CHART ENTRIES</span><strong id="metric-entries">—</strong><span class="metric-note">saved for everyone</span><span class="metric-glyph" aria-hidden="true">↗</span></article>
           <article class="metric-card"><span class="metric-label">SNAPSHOTS</span><strong id="metric-snapshots">—</strong><span class="metric-note">unique market-days</span></article>
           <article class="metric-card"><span class="metric-label">ACTIVE JOBS</span><strong id="metric-jobs">—</strong><span class="metric-note">queued or collecting</span></article>

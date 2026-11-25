@@ -685,8 +685,10 @@ async def browse_entries(
     entity_id: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    latest_only: bool = False,
+    search: str | None = Query(default=None, max_length=120),
     page: int = Query(default=1, ge=1, le=100_000),
-    page_size: int = Query(default=25, ge=1, le=100),
+    page_size: int = Query(default=100, ge=1, le=200),
     current_user: str = Depends(public_user_id),
 ):
     if chart_type and chart_type not in CHART_TYPES:
@@ -700,12 +702,17 @@ async def browse_entries(
 
     conditions = ["e.user_id=$1"]
     args: list = [current_user]
-    for column, value in (("e.chart_type", chart_type), ("e.market", market),
-                          ("e.entity_type", entity_type), ("e.entity_id", entity_id),
-                          ("e.snapshot_date >=", start_date), ("e.snapshot_date <=", end_date)):
+    for column, operator, value in (("e.chart_type", "=", chart_type), ("e.market", "=", market),
+                                    ("e.entity_type", "=", entity_type), ("e.entity_id", "=", entity_id),
+                                    ("e.snapshot_date", ">=", start_date), ("e.snapshot_date", "<=", end_date)):
         if value is not None:
             args.append(value)
-            conditions.append(f"{column} ${len(args)}")
+            conditions.append(f"{column} {operator} ${len(args)}")
+    if latest_only:
+        conditions.append("e.snapshot_date=(SELECT MAX(latest.snapshot_date) FROM yt_chart_entries latest WHERE latest.user_id=e.user_id AND latest.chart_type=e.chart_type AND latest.market=e.market AND latest.entity_type=e.entity_type AND latest.entity_id=e.entity_id)")
+    if search and search.strip():
+        args.append(f"%{search.strip()}%")
+        conditions.append(f"(e.title ILIKE ${len(args)} OR COALESCE(e.metrics->>'artists','') ILIKE ${len(args)})")
     where = " AND ".join(conditions)
     database = require_pool()
     async with database.acquire() as connection:

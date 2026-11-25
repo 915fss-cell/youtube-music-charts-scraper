@@ -1,4 +1,4 @@
-const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, snapshotSignature: '', pollTimer: null, playlistReference: '', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
+const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, explorerPage: 1, explorerPageSize: 100, explorerTotal: 0, snapshotSignature: '', pollTimer: null, playlistReference: '', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
 const byId = (id) => document.getElementById(id)
 const toast = byId('toast')
 let toastTimer
@@ -60,6 +60,8 @@ function renderMarkets() {
   byId('filter-market').insertAdjacentHTML('beforeend', marketOptions)
   byId('live-market').innerHTML = marketOptions
   byId('live-market').value = 'US'
+  byId('explorer-market').innerHTML = marketOptions
+  byId('explorer-market').value = 'US'
   byId('market-options').addEventListener('change', (event) => {
     const changed = event.target
     if (changed.value === 'global' && changed.checked) {
@@ -250,7 +252,7 @@ async function loadSummary() {
   if (state.snapshotSignature && state.snapshotSignature !== signature) {
     await loadEntities()
     state.page = 1
-    await loadEntries()
+    await Promise.all([loadEntries(), loadExplorer()])
   }
   state.snapshotSignature = signature
 }
@@ -348,12 +350,105 @@ async function loadEntries() {
   }
 }
 
+function explorerQuery() {
+  const params = new URLSearchParams({
+    chart_type: byId('explorer-chart').value,
+    market: byId('explorer-market').value,
+    page: String(state.explorerPage),
+    page_size: String(state.explorerPageSize),
+    entity_type: 'all',
+    entity_id: 'all',
+  })
+  const date = byId('explorer-date').value
+  if (date) {
+    params.set('start_date', date)
+    params.set('end_date', date)
+  } else {
+    params.set('latest_only', 'true')
+  }
+  const search = byId('explorer-query').value.trim()
+  if (search) params.set('search', search)
+  return params
+}
+
+function renderExplorerEntries(entries) {
+  const body = byId('explorer-entries-body')
+  if (!entries.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty-cell">No saved chart entries match. Collect this chart to add a snapshot to the archive.</td></tr>'
+    return
+  }
+  body.innerHTML = entries.map((entry) => {
+    const rank = entry.rank == null ? '—' : `#${Number(entry.rank)}`
+    const movement = entry.rank_change == null
+      ? '<span class="rank-change new">NEW</span>'
+      : `<span class="rank-change ${Number(entry.rank_change) > 0 ? 'up' : Number(entry.rank_change) < 0 ? 'down' : 'flat'}">${Number(entry.rank_change) > 0 ? '↑ ' : Number(entry.rank_change) < 0 ? '↓ ' : '='}${Number(entry.rank_change) ? Math.abs(Number(entry.rank_change)) : ''}</span>`
+    const thumbnail = entry.video_id ? `https://i.ytimg.com/vi/${encodeURIComponent(entry.video_id)}/mqdefault.jpg` : ''
+    const metrics = entry.metrics || {}
+    const previous = entry.previous_rank == null ? '—' : `#${Number(entry.previous_rank)}`
+    return `<tr><td class="explorer-rank">${rank}</td><td>${movement}</td><td><div class="entry-cell">${thumbnail ? `<img class="entry-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '<span class="entry-thumb-fallback" aria-hidden="true">YT</span>'}<div><div class="entry-title">${escapeHtml(entry.title)}</div><div class="entry-subtitle">${escapeHtml((metrics.artists || []).join?.(', ') || chartLabel(entry.chart_type))}</div></div></div></td><td><span class="views-value">${formatCompact(entry.view_count)}</span></td><td>${previous}</td><td>${escapeHtml(metrics.weeks_on_chart || '—')}</td><td>${escapeHtml(metrics.release_date || '—')}</td></tr>`
+  }).join('')
+}
+
+async function loadExplorer() {
+  const body = byId('explorer-entries-body')
+  if (!body) return
+  body.innerHTML = '<tr><td colspan="7" class="loading-cell">Loading chart entries…</td></tr>'
+  const market = state.markets.find((item) => item.code === byId('explorer-market').value)
+  const chart = byId('explorer-chart').value
+  byId('explorer-chart-title').textContent = `${chartLabel(chart)} · ${market?.name || byId('explorer-market').value}`
+  try {
+    const result = await request(`/api/entries?${explorerQuery()}`)
+    state.explorerTotal = result.total
+    renderExplorerEntries(result.items)
+    const date = result.items[0]?.snapshot_date || byId('explorer-date').value
+    byId('explorer-date-label').textContent = date ? `${formatDate(date)} · Saved chart snapshot` : 'No saved snapshot yet'
+    byId('explorer-meta').textContent = `${Number(result.total).toLocaleString()} ${result.total === 1 ? 'entry' : 'entries'} · ${chart === 'TopArtists' ? 'artist chart' : 'weekly chart'}`
+    byId('explorer-count').textContent = result.total ? `Showing ${(state.explorerPage - 1) * state.explorerPageSize + 1}–${Math.min(state.explorerPage * state.explorerPageSize, result.total)} of ${Number(result.total).toLocaleString()} chart entries.` : 'No saved entries for this chart yet.'
+    const pages = Math.max(1, Math.ceil(result.total / state.explorerPageSize))
+    byId('explorer-page-indicator').textContent = `Page ${state.explorerPage} of ${pages}`
+    byId('explorer-prev').disabled = state.explorerPage <= 1
+    byId('explorer-next').disabled = state.explorerPage >= pages
+  } catch (error) {
+    body.innerHTML = `<tr><td colspan="7" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
+    byId('explorer-meta').textContent = 'Unable to load chart'
+  }
+}
+
+async function collectExplorerChart() {
+  const button = byId('save-chart-history')
+  button.disabled = true
+  try {
+    const chartDate = byId('explorer-date').value || lastChartFriday()
+    const market = byId('explorer-market').value
+    const chartType = byId('explorer-chart').value
+    await request('/api/jobs', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: `Chart explorer · ${chartLabel(chartType)}`,
+        chart_type: chartType,
+        entity_type: 'all',
+        entity_id: 'all',
+        markets: [market],
+        start_date: chartDate,
+        end_date: chartDate,
+        save_configuration: false,
+      }),
+    })
+    showToast(`Collection queued for ${market} · ${chartDate}.`)
+    await Promise.all([loadJobs(), loadSummary()])
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    button.disabled = false
+  }
+}
+
 async function loadWorkspace() {
   try {
     state.markets = await request('/api/markets')
     renderMarkets()
     await loadEntities()
-    await Promise.all([loadSummary(), loadConfigurations(), loadJobs(), loadEntries()])
+    await Promise.all([loadSummary(), loadConfigurations(), loadJobs(), loadEntries(), loadExplorer()])
     byId('connection-status').textContent = 'DATABASE CONNECTED'
     byId('connection-status').style.color = 'var(--green)'
     clearInterval(state.pollTimer)
@@ -491,6 +586,11 @@ function activatePage(page) {
   if (validPage === 'history' && state.playlistReference) loadPlaylistHistory()
 }
 
+byId('load-chart').addEventListener('click', () => { state.explorerPage = 1; loadExplorer() })
+byId('explorer-search-form').addEventListener('submit', (event) => { event.preventDefault(); state.explorerPage = 1; loadExplorer() })
+byId('explorer-prev').addEventListener('click', () => { state.explorerPage = Math.max(1, state.explorerPage - 1); loadExplorer() })
+byId('explorer-next').addEventListener('click', () => { state.explorerPage += 1; loadExplorer() })
+byId('save-chart-history').addEventListener('click', collectExplorerChart)
 byId('playlist-form').addEventListener('submit', loadLiveFilter)
 byId('load-history').addEventListener('click', loadPlaylistHistory)
 byId('history-prev').addEventListener('click', () => { state.historyPage = Math.max(1, state.historyPage - 1); loadPlaylistHistory() })
