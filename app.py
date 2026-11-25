@@ -24,11 +24,25 @@ ROOT = Path(__file__).resolve().parent
 CHART_TYPES = {"TopSongs", "TopMusicVideos", "TopArtists"}
 ENTITY_TYPES = {"all", "video", "channel", "artist"}
 MARKETS = {
-    "global": "Global", "US": "United States", "GB": "United Kingdom", "CA": "Canada",
-    "AU": "Australia", "NZ": "New Zealand", "DE": "Germany", "FR": "France",
-    "IT": "Italy", "ES": "Spain", "BR": "Brazil", "MX": "Mexico", "JP": "Japan",
-    "KR": "South Korea", "IN": "India", "ID": "Indonesia", "PH": "Philippines",
-    "AR": "Argentina", "NL": "Netherlands", "SE": "Sweden", "NO": "Norway",
+    "global": "Global",
+    "AR": "Argentina", "AU": "Australia", "AT": "Austria", "BE": "Belgium",
+    "BO": "Bolivia", "BR": "Brazil", "CA": "Canada", "CL": "Chile",
+    "CO": "Colombia", "CR": "Costa Rica", "CZ": "Czech Republic", "DK": "Denmark",
+    "DO": "Dominican Republic", "EC": "Ecuador", "EG": "Egypt", "SV": "El Salvador",
+    "EE": "Estonia", "FI": "Finland", "FR": "France", "DE": "Germany",
+    "GT": "Guatemala", "HN": "Honduras", "HK": "Hong Kong", "HU": "Hungary",
+    "IS": "Iceland", "IN": "India", "ID": "Indonesia", "IE": "Ireland",
+    "IL": "Israel", "IT": "Italy", "JP": "Japan", "KE": "Kenya",
+    "LU": "Luxembourg", "MY": "Malaysia", "MX": "Mexico", "NL": "Netherlands",
+    "NZ": "New Zealand", "NI": "Nicaragua", "NG": "Nigeria", "NO": "Norway",
+    "PA": "Panama", "PY": "Paraguay", "PE": "Peru", "PH": "Philippines",
+    "PL": "Poland", "PT": "Portugal", "RO": "Romania", "RU": "Russia",
+    "SA": "Saudi Arabia", "RS": "Serbia", "SG": "Singapore", "ZA": "South Africa",
+    "KR": "South Korea", "ES": "Spain", "SE": "Sweden", "CH": "Switzerland",
+    "TW": "Taiwan", "TZ": "Tanzania", "TH": "Thailand", "TR": "Turkey",
+    "UG": "Uganda", "GB": "United Kingdom", "UA": "Ukraine",
+    "AE": "United Arab Emirates", "US": "United States", "UY": "Uruguay",
+    "VN": "Vietnam", "ZW": "Zimbabwe",
 }
 WORKER_INTERVAL_SECONDS = 5
 MAX_JOB_DAYS = 365
