@@ -1,4 +1,4 @@
-const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, explorerPage: 1, explorerPageSize: 100, explorerTotal: 0, snapshotSignature: '', pollTimer: null, playlistReference: '', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
+const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, explorerPage: 1, explorerPageSize: 100, explorerTotal: 0, liveChartCache: {}, snapshotSignature: '', pollTimer: null, playlistReference: '', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
 const byId = (id) => document.getElementById(id)
 const toast = byId('toast')
 let toastTimer
@@ -138,7 +138,7 @@ function formatCompact(value, suffix = '') {
 }
 
 function chartLabel(type) {
-  return ({ TopSongs: 'Top songs', TopMusicVideos: 'Top music videos', TopArtists: 'Top artists' })[type] || type
+  return ({ PopularMusicVideos: 'Popular music videos', TopSongs: 'Top songs', TopMusicVideos: 'Top music videos', TopArtists: 'Top artists' })[type] || type
 }
 
 function statusLabel(status) {
@@ -371,40 +371,77 @@ function explorerQuery() {
   return params
 }
 
-function renderExplorerEntries(entries) {
+function renderExplorerEntries(entries, live = false) {
   const body = byId('explorer-entries-body')
+  const headings = live
+    ? ['Rank', 'Source', 'Video', 'Views', 'Channel', 'Published', 'Category']
+    : ['Rank', 'Movement', 'Chart entry', 'Weekly views', 'Previous', 'Weeks on chart', 'Release date']
+  document.querySelectorAll('.explorer-table-wrap thead th').forEach((heading, index) => { heading.textContent = headings[index] })
   if (!entries.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-cell">No snapshots saved yet. Open on YouTube above to view the current chart without saving anything.</td></tr>'
+    body.innerHTML = `<tr><td colspan="7" class="empty-cell">${live ? 'No matching videos in the current popular-music list.' : 'No snapshots saved yet. Choose Popular music videos · live to browse current data.'}</td></tr>`
     return
   }
   body.innerHTML = entries.map((entry) => {
     const rank = entry.rank == null ? '—' : `#${Number(entry.rank)}`
-    const movement = entry.rank_change == null
-      ? '<span class="rank-change new">NEW</span>'
-      : `<span class="rank-change ${Number(entry.rank_change) > 0 ? 'up' : Number(entry.rank_change) < 0 ? 'down' : 'flat'}">${Number(entry.rank_change) > 0 ? '↑ ' : Number(entry.rank_change) < 0 ? '↓ ' : '='}${Number(entry.rank_change) ? Math.abs(Number(entry.rank_change)) : ''}</span>`
+    const movement = live
+      ? '<span class="rank-change flat">LIVE</span>'
+      : entry.rank_change == null
+        ? '<span class="rank-change new">NEW</span>'
+        : `<span class="rank-change ${Number(entry.rank_change) > 0 ? 'up' : Number(entry.rank_change) < 0 ? 'down' : 'flat'}">${Number(entry.rank_change) > 0 ? '↑ ' : Number(entry.rank_change) < 0 ? '↓ ' : '='}${Number(entry.rank_change) ? Math.abs(Number(entry.rank_change)) : ''}</span>`
     const thumbnail = entry.video_id ? `https://i.ytimg.com/vi/${encodeURIComponent(entry.video_id)}/mqdefault.jpg` : ''
     const metrics = entry.metrics || {}
-    const previous = entry.previous_rank == null ? '—' : `#${Number(entry.previous_rank)}`
-    return `<tr><td class="explorer-rank">${rank}</td><td>${movement}</td><td><div class="entry-cell">${thumbnail ? `<img class="entry-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '<span class="entry-thumb-fallback" aria-hidden="true">YT</span>'}<div><div class="entry-title">${escapeHtml(entry.title)}</div><div class="entry-subtitle">${escapeHtml((metrics.artists || []).join?.(', ') || chartLabel(entry.chart_type))}</div></div></div></td><td><span class="views-value">${formatCompact(entry.view_count)}</span></td><td>${previous}</td><td>${escapeHtml(metrics.weeks_on_chart || '—')}</td><td>${escapeHtml(metrics.release_date || '—')}</td></tr>`
+    const previous = live ? escapeHtml(entry.channel_title || '—') : entry.previous_rank == null ? '—' : `#${Number(entry.previous_rank)}`
+    const weeks = live ? escapeHtml(entry.published_at?.slice(0, 10) || '—') : escapeHtml(metrics.weeks_on_chart || '—')
+    const release = live ? 'Music video' : escapeHtml(metrics.release_date || '—')
+    const subtitle = live ? entry.channel_title : (metrics.artists || []).join?.(', ') || chartLabel(entry.chart_type)
+    return `<tr><td class="explorer-rank">${rank}</td><td>${movement}</td><td><div class="entry-cell">${thumbnail ? `<img class="entry-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '<span class="entry-thumb-fallback" aria-hidden="true">YT</span>'}<div><div class="entry-title">${escapeHtml(entry.title)}</div><div class="entry-subtitle">${escapeHtml(subtitle || chartLabel(entry.chart_type))}</div></div></div></td><td><span class="views-value">${formatCompact(entry.view_count)}</span></td><td>${previous}</td><td>${weeks}</td><td>${release}</td></tr>`
   }).join('')
 }
 
-function openOfficialChart() {
-  const chart = byId('explorer-chart').value
-  const market = byId('explorer-market').value.toLowerCase()
-  const chartDate = byId('explorer-date').value || lastChartFriday()
-  const chartUrl = `https://charts.youtube.com/charts/${encodeURIComponent(chart)}/${encodeURIComponent(market)}/weekly/${encodeURIComponent(chartDate)}`
-  window.open(chartUrl, '_blank', 'noopener,noreferrer')
-}
-
-async function loadExplorer() {
+async function loadExplorer(forceRefresh = false) {
   const body = byId('explorer-entries-body')
   if (!body) return
   body.innerHTML = '<tr><td colspan="7" class="loading-cell">Loading chart entries…</td></tr>'
-  const market = state.markets.find((item) => item.code === byId('explorer-market').value)
+  const selectedMarket = byId('explorer-market').value
+  const market = state.markets.find((item) => item.code === selectedMarket)
   const chart = byId('explorer-chart').value
-  byId('explorer-chart-title').textContent = `${chartLabel(chart)} · ${market?.name || byId('explorer-market').value}`
+  const live = chart === 'PopularMusicVideos'
+  byId('explorer-chart-title').textContent = `${chartLabel(chart)} · ${market?.name || selectedMarket}`
+  byId('explorer-date').disabled = live
+  byId('load-chart').textContent = live ? 'Refresh live list' : 'Refresh results'
+  byId('save-chart-history').disabled = live
+  byId('save-chart-history').textContent = live ? 'Live list · not saved' : 'Save snapshot'
+  byId('save-chart-history').title = live ? 'Live popular videos are not saved as chart snapshots.' : ''
+  byId('explorer-source-note').textContent = live
+    ? 'Live results use YouTube’s Most Popular Music category, not the official weekly YouTube Charts.'
+    : 'Saved snapshots are stored in this chart explorer.'
   try {
+    if (live) {
+      state.explorerPage = 1
+      if (selectedMarket === 'global') throw new Error('Choose a country market to load live YouTube data.')
+      const cached = state.liveChartCache[selectedMarket]
+      let result = cached && Date.now() - cached.cachedAt < 5 * 60 * 1000 ? cached.data : null
+      if (!result || forceRefresh) {
+        result = await request(`/api/live-music-videos?${new URLSearchParams({ market: selectedMarket })}`)
+        state.liveChartCache[selectedMarket] = { data: result, cachedAt: Date.now() }
+      }
+      const search = byId('explorer-query').value.trim().toLocaleLowerCase()
+      const entries = search
+        ? result.items.filter((entry) => `${entry.title} ${entry.channel_title}`.toLocaleLowerCase().includes(search))
+        : result.items
+      renderExplorerEntries(entries, true)
+      const refreshed = new Date(result.fetched_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+      byId('explorer-date-label').textContent = `Live · refreshed ${refreshed}`
+      byId('explorer-meta').textContent = `${result.total} popular music videos · ${market?.name || selectedMarket}`
+      byId('explorer-count').textContent = search
+        ? `${entries.length} matching videos from ${result.total} live results.`
+        : `Showing ${entries.length} live YouTube popular-music videos.`
+      byId('explorer-page-indicator').textContent = 'Live list'
+      byId('explorer-prev').disabled = true
+      byId('explorer-next').disabled = true
+      return
+    }
+
     const result = await request(`/api/entries?${explorerQuery()}`)
     state.explorerTotal = result.total
     renderExplorerEntries(result.items)
@@ -594,8 +631,11 @@ function activatePage(page) {
   if (validPage === 'history' && state.playlistReference) loadPlaylistHistory()
 }
 
-byId('load-chart').addEventListener('click', openOfficialChart)
+byId('load-chart').addEventListener('click', () => loadExplorer(true))
 byId('explorer-search-form').addEventListener('submit', (event) => { event.preventDefault(); state.explorerPage = 1; loadExplorer() })
+byId('explorer-chart').addEventListener('change', () => { state.explorerPage = 1; loadExplorer() })
+byId('explorer-market').addEventListener('change', () => { state.explorerPage = 1; loadExplorer() })
+byId('explorer-date').addEventListener('change', () => { state.explorerPage = 1; loadExplorer() })
 byId('explorer-prev').addEventListener('click', () => { state.explorerPage = Math.max(1, state.explorerPage - 1); loadExplorer() })
 byId('explorer-next').addEventListener('click', () => { state.explorerPage += 1; loadExplorer() })
 byId('save-chart-history').addEventListener('click', collectExplorerChart)
