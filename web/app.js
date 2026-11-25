@@ -1,4 +1,4 @@
-const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, explorerPage: 1, explorerPageSize: 100, explorerTotal: 0, snapshotSignature: '', pollTimer: null, playlistReference: '', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
+const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, explorerPage: 1, explorerPageSize: 100, explorerTotal: 0, snapshotSignature: '', pollTimer: null, playlistReference: '', playlistMatches: [], liveView: 'videos', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
 const byId = (id) => document.getElementById(id)
 const toast = byId('toast')
 let toastTimer
@@ -138,7 +138,7 @@ function formatCompact(value, suffix = '') {
 }
 
 function chartLabel(type) {
-  return ({ TrendingVideos: 'Trending', TopMusicVideos: 'Music Videos', TopSongs: 'Songs', TopArtists: 'Artists', TopShortsSongs: 'Shorts Songs' })[type] || type
+  return ({ TrendingVideos: 'Trending Videos', TopMusicVideos: 'Music Videos', TopSongs: 'Songs', TopArtists: 'Artists', TopShortsSongs: 'Shorts Songs' })[type] || type
 }
 
 function statusLabel(status) {
@@ -550,13 +550,57 @@ async function refreshJobs() {
 function renderPlaylistRows(targetId, items) {
   const body = byId(targetId)
   if (!items.length) {
-    body.innerHTML = `<tr><td colspan="4" class="empty-cell">No matching playlist videos were found in the saved chart snapshots.</td></tr>`
+    body.innerHTML = '<tr><td colspan="4" class="empty-cell">No playlist videos are charting in this selection yet.</td></tr>'
     return
   }
   body.innerHTML = items.map((entry) => {
     const thumbnail = entry.video_id ? `https://i.ytimg.com/vi/${encodeURIComponent(entry.video_id)}/mqdefault.jpg` : ''
     return `<tr><td><div class="week-market">${escapeHtml(formatDate(entry.snapshot_date, { month: 'short', day: 'numeric', year: '2-digit' }))}<br />${escapeHtml(entry.market)}</div></td><td><div class="entry-cell">${thumbnail ? `<img class="entry-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}<div><div class="entry-title">${escapeHtml(entry.title)}</div><div class="entry-subtitle">${escapeHtml(chartLabel(entry.chart_type))}</div></div></div></td><td><span class="rank-value">${entry.rank == null ? '—' : `#${Number(entry.rank)}`}</span></td><td><span class="views-value">${formatCompact(entry.view_count)}</span></td></tr>`
   }).join('')
+}
+
+function renderVideoMatches(items) {
+  const container = byId('live-video-results')
+  if (!items.length) {
+    container.innerHTML = '<div class="empty-panel">No playlist videos are charting in this region yet.<span>Try another region or check back after more chart snapshots are saved.</span></div>'
+    byId('live-video-meta').textContent = '0 CHARTING VIDEOS'
+    return
+  }
+  const videos = new Map()
+  items.forEach((entry) => {
+    const key = entry.video_id || entry.id || entry.title
+    if (!videos.has(key)) videos.set(key, { ...entry, charts: new Map() })
+    videos.get(key).charts.set(`${entry.chart_type}:${entry.market}`, entry)
+  })
+  const groups = [...videos.values()]
+  container.innerHTML = groups.map((video) => {
+    const thumbnail = video.video_id ? `https://i.ytimg.com/vi/${encodeURIComponent(video.video_id)}/mqdefault.jpg` : ''
+    const charts = [...video.charts.values()].sort((a, b) => chartLabel(a.chart_type).localeCompare(chartLabel(b.chart_type)))
+    const chartList = charts.map((entry) => `<span class="video-chart-chip"><span>${escapeHtml(chartLabel(entry.chart_type))}</span><strong>${entry.rank == null ? '—' : `#${Number(entry.rank)}`} · ${escapeHtml(formatDate(entry.snapshot_date, { month: 'short', day: 'numeric' }))}</strong></span>`).join('')
+    return `<article class="video-match-card"><div class="video-match-heading">${thumbnail ? `<img class="video-match-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}<div class="video-match-copy"><h3>${escapeHtml(video.title)}</h3><p>${charts.length} chart${charts.length === 1 ? '' : 's'} · ${escapeHtml(video.market)}</p></div></div><div class="video-chart-list" aria-label="Charts this video appears in">${chartList}</div></article>`
+  }).join('')
+  byId('live-video-meta').textContent = `${groups.length} CHARTING VIDEOS`
+}
+
+function renderChartMatches() {
+  const chart = byId('live-chart').value
+  const chartName = chartLabel(chart)
+  byId('live-chart-title').textContent = `${chartName} charting now`
+  const items = state.playlistMatches.filter((entry) => entry.chart_type === chart && entry.market === byId('live-market').value)
+  renderPlaylistRows('live-results-body', items)
+  byId('live-chart-meta').textContent = `${items.length} MATCHING VIDEOS`
+}
+
+function setLiveView(view) {
+  state.liveView = view === 'chart' ? 'chart' : 'videos'
+  document.querySelectorAll('[data-live-view]').forEach((button) => {
+    const active = button.dataset.liveView === state.liveView
+    button.classList.toggle('is-active', active)
+    button.setAttribute('aria-pressed', String(active))
+  })
+  byId('live-video-panel').hidden = state.liveView !== 'videos'
+  byId('live-chart-panel').hidden = state.liveView !== 'chart'
+  if (state.liveView === 'chart') renderChartMatches()
 }
 
 function playlistQuery(history = false) {
@@ -580,16 +624,21 @@ async function loadLiveFilter(event) {
   if (!state.playlistReference) return
   const button = byId('playlist-submit')
   button.disabled = true
+  byId('live-video-results').innerHTML = '<div class="empty-panel">Checking playlist videos against saved charts…</div>'
   byId('live-results-body').innerHTML = '<tr><td colspan="4" class="loading-cell">Checking saved chart results…</td></tr>'
   try {
-    const result = await request(`/api/live-filter?${playlistQuery()}`)
-    renderPlaylistRows('live-results-body', result.items)
-    byId('live-result-meta').textContent = `${result.total} MATCHING VIDEOS`
+    const params = playlistQuery()
+    params.set('view', 'videos')
+    const result = await request(`/api/live-filter?${params}`)
+    state.playlistMatches = result.items
+    renderVideoMatches(state.playlistMatches)
+    renderChartMatches()
     state.historyPage = 1
     if (location.hash === '#history') await loadPlaylistHistory()
   } catch (error) {
     errorNode.textContent = error.message
     errorNode.hidden = false
+    byId('live-video-results').innerHTML = `<div class="empty-panel">${escapeHtml(error.message)}</div>`
     byId('live-results-body').innerHTML = `<tr><td colspan="4" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
   } finally {
     button.disabled = false
@@ -646,6 +695,10 @@ byId('explorer-prev').addEventListener('click', () => { state.explorerPage = Mat
 byId('explorer-next').addEventListener('click', () => { state.explorerPage += 1; loadExplorer() })
 byId('save-chart-history').addEventListener('click', collectExplorerChart)
 byId('playlist-form').addEventListener('submit', loadLiveFilter)
+document.querySelectorAll('[data-live-view]').forEach((button) => {
+  button.addEventListener('click', () => setLiveView(button.dataset.liveView))
+})
+byId('live-chart').addEventListener('change', renderChartMatches)
 byId('load-history').addEventListener('click', loadPlaylistHistory)
 byId('history-prev').addEventListener('click', () => { state.historyPage = Math.max(1, state.historyPage - 1); loadPlaylistHistory() })
 byId('history-next').addEventListener('click', () => { state.historyPage += 1; loadPlaylistHistory() })

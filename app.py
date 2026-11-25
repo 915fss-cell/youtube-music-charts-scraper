@@ -823,6 +823,7 @@ async def playlist_chart_entries(
     page: int = 1,
     page_size: int = 50,
     current_user: str = PUBLIC_USER_ID,
+    all_charts: bool = False,
 ):
     if chart_type not in CHART_TYPES:
         raise HTTPException(status_code=422, detail="Unsupported chart type")
@@ -832,8 +833,11 @@ async def playlist_chart_entries(
     if not video_ids:
         return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
-    conditions = ["e.user_id=$1", "e.chart_type=$2", "e.market=$3", "e.entity_type='all'", "e.entity_id='all'", "e.video_id = ANY($4::text[])"]
-    args = [current_user, chart_type, market, video_ids]
+    conditions = ["e.user_id=$1", "e.market=$2", "e.entity_type='all'", "e.entity_id='all'", "e.video_id = ANY($3::text[])"]
+    args = [current_user, market, video_ids]
+    if not all_charts:
+        conditions.append(f"e.chart_type=${len(args) + 1}")
+        args.append(chart_type)
     if not history:
         conditions.append("e.snapshot_date=(SELECT MAX(latest.snapshot_date) FROM yt_chart_entries latest WHERE latest.user_id=e.user_id AND latest.chart_type=e.chart_type AND latest.market=e.market AND latest.entity_type='all' AND latest.entity_id='all')")
     where = " AND ".join(conditions)
@@ -854,7 +858,7 @@ async def playlist_chart_entries(
                 ) prior ON TRUE
                 WHERE {where}
                 ORDER BY e.snapshot_date DESC,e.rank ASC NULLS LAST,e.title
-                LIMIT $5 OFFSET $6""",
+                LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}""",
             *args, page_size, (page - 1) * page_size,
         )
     return {"items": [row_dict(row) for row in rows], "total": total, "page": page, "page_size": page_size}
@@ -866,9 +870,10 @@ async def live_filter(
     playlist: str = Query(min_length=1, max_length=1000),
     chart_type: str = "TopSongs",
     market: str = "US",
+    view: Literal["videos", "chart"] = "chart",
 ):
     ensure_same_origin(request)
-    return await playlist_chart_entries(playlist, chart_type, market, history=False)
+    return await playlist_chart_entries(playlist, chart_type, market, history=False, all_charts=view == "videos")
 
 
 @app.get("/api/live-history")
