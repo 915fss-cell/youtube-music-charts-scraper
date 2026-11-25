@@ -64,7 +64,7 @@ def _ids_from_url(url: str | None) -> tuple[str | None, str | None]:
     return video_id, channel_id
 
 
-def _read_rows(page) -> list[dict]:
+def _read_rows(page, chart_type: str) -> list[dict]:
     rows = page.locator(ROW_SELECTOR)
     count = rows.count()
     entries: list[dict] = []
@@ -86,13 +86,27 @@ def _read_rows(page) -> list[dict]:
         artists = [artist for artist in artists if artist]
         metric_nodes = row.locator("div.metric.content.center")
         raw_metrics = [_text(metric_nodes.nth(i)) for i in range(metric_nodes.count())]
-        metrics = {
-            "artists": artists,
-            "release_date": raw_metrics[0] if len(raw_metrics) > 0 else None,
-            "last_week_position": raw_metrics[1] if len(raw_metrics) > 1 else None,
-            "weeks_on_chart": raw_metrics[2] if len(raw_metrics) > 2 else None,
-            "weekly_views": raw_metrics[3] if len(raw_metrics) > 3 else None,
-        }
+        if chart_type in {"TopMusicVideos", "TopShortsSongs"}:
+            metrics = {
+                "artists": artists,
+                "yesterday_position": raw_metrics[0] if len(raw_metrics) > 0 else None,
+                "days_on_chart": raw_metrics[1] if len(raw_metrics) > 1 else None,
+            }
+            if chart_type == "TopShortsSongs":
+                metrics["shorts_creations"] = raw_metrics[2] if len(raw_metrics) > 2 else None
+        elif chart_type == "TrendingVideos":
+            metrics = {
+                "artists": artists,
+                "release_date": raw_metrics[0] if raw_metrics else None,
+            }
+        else:
+            metrics = {
+                "artists": artists,
+                "release_date": raw_metrics[0] if len(raw_metrics) > 0 else None,
+                "last_week_position": raw_metrics[1] if len(raw_metrics) > 1 else None,
+                "weeks_on_chart": raw_metrics[2] if len(raw_metrics) > 2 else None,
+                "weekly_views": raw_metrics[3] if len(raw_metrics) > 3 else None,
+            }
         thumbnail = row.locator("#thumbnail").get_attribute("src")
         entry_id = video_id or channel_id or (urlparse(url).path.strip("/") if url else "")
         if not entry_id:
@@ -108,7 +122,7 @@ def _read_rows(page) -> list[dict]:
                 "url": url,
                 "thumbnail": thumbnail,
                 "artists": artists,
-                "view_count": _metric_number(metrics["weekly_views"]),
+                "view_count": _metric_number(metrics.get("weekly_views")),
                 "like_count": None,
                 "comment_count": None,
                 "metrics": metrics,
@@ -118,8 +132,27 @@ def _read_rows(page) -> list[dict]:
     return entries
 
 
+def _chart_url(chart_type: str, market: str, chart_date: str) -> str:
+    chart_slugs = {
+        "TrendingVideos": "TrendingVideos",
+        "TopMusicVideos": "TopVideos",
+        "TopSongs": "TopSongs",
+        "TopArtists": "TopArtists",
+        "TopShortsSongs": "TopShortsSongs",
+    }
+    chart_slug = chart_slugs.get(chart_type)
+    if not chart_slug:
+        raise ValueError(f"Unsupported YouTube Charts type: {chart_type}")
+    if chart_type == "TrendingVideos":
+        chart_path = f"{market.lower()}/RightNow"
+    else:
+        frequency = "daily" if chart_type in {"TopMusicVideos", "TopShortsSongs"} else "weekly"
+        chart_path = f"{market.lower()}/{frequency}/{chart_date}"
+    return f"https://charts.youtube.com/charts/{chart_slug}/{chart_path}"
+
+
 def fetch_youtube_chart(chart_type: str, market: str, chart_date: str) -> list[dict]:
-    url = f"https://charts.youtube.com/charts/{chart_type}/{market.lower()}/weekly/{chart_date}"
+    url = _chart_url(chart_type, market, chart_date)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         try:
@@ -144,7 +177,7 @@ def fetch_youtube_chart(chart_type: str, market: str, chart_date: str) -> list[d
                     stable_scrolls = 0
                     previous_count = current_count
 
-            entries = _read_rows(page)
+            entries = _read_rows(page, chart_type)
             if not entries:
                 raise RuntimeError("YouTube Charts returned an empty chart for this date and market.")
             return entries

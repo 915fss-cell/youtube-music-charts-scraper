@@ -21,7 +21,7 @@ from src.chart_collector import fetch_youtube_chart
 
 
 ROOT = Path(__file__).resolve().parent
-CHART_TYPES = {"TopSongs", "TopMusicVideos", "TopArtists"}
+CHART_TYPES = {"TrendingVideos", "TopMusicVideos", "TopSongs", "TopArtists", "TopShortsSongs"}
 ENTITY_TYPES = {"all", "video", "channel", "artist"}
 MARKETS = {
     "global": "Global",
@@ -108,7 +108,7 @@ def row_dict(row: asyncpg.Record) -> dict:
 
 class ConfigurationInput(BaseModel):
     name: str = Field(min_length=1, max_length=80)
-    chart_type: Literal["TopSongs", "TopMusicVideos", "TopArtists"]
+    chart_type: Literal["TopSongs", "TopMusicVideos", "TopArtists", "TopShortsSongs"]
     entity_type: Literal["all", "video", "channel", "artist"] = "all"
     entity_id: str = Field(default="all", max_length=200)
     markets: list[str] = Field(min_length=1, max_length=10)
@@ -752,56 +752,6 @@ async def browse_entries(
             *page_args,
         )
     return {"items": [row_dict(row) for row in rows], "total": total, "page": page, "page_size": page_size}
-
-
-def fetch_popular_music_videos(market: str) -> dict:
-    api_key = os.environ.get("YOUTUBE_DATA_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=503, detail="Live video rankings are not configured yet")
-
-    params = {
-        "part": "snippet,statistics",
-        "chart": "mostPopular",
-        "regionCode": market,
-        "videoCategoryId": "10",
-        "maxResults": "50",
-        "key": api_key,
-    }
-    query = urlencode(params)
-    try:
-        with urlopen(f"https://www.googleapis.com/youtube/v3/videos?{query}", timeout=12) as response:
-            payload = json.loads(response.read())
-    except Exception as error:
-        raise HTTPException(status_code=502, detail="Could not load YouTube's live popular music videos. Check the API key and quota.") from error
-
-    items = []
-    for index, item in enumerate(payload.get("items", []), start=1):
-        snippet = item.get("snippet", {})
-        statistics = item.get("statistics", {})
-        items.append({
-            "rank": index,
-            "video_id": item.get("id"),
-            "title": snippet.get("title", "Untitled video"),
-            "channel_id": snippet.get("channelId"),
-            "channel_title": snippet.get("channelTitle", ""),
-            "published_at": snippet.get("publishedAt", ""),
-            "view_count": statistics.get("viewCount", 0),
-        })
-    return {"items": items, "total": len(items), "fetched_at": datetime.now(timezone.utc).isoformat()}
-
-
-@app.get("/api/live-music-videos")
-async def live_music_videos(
-    market: str = Query(default="US", min_length=2, max_length=6),
-    search: str | None = Query(default=None, max_length=120),
-):
-    if market not in MARKETS or market == "global":
-        raise HTTPException(status_code=422, detail="Choose a country market for live YouTube data")
-    result = await asyncio.to_thread(fetch_popular_music_videos, market)
-    if search and search.strip():
-        term = search.strip().casefold()
-        result["items"] = [item for item in result["items"] if term in item["title"].casefold() or term in item["channel_title"].casefold()]
-    return result
 
 
 def fetch_playlist_video_ids(playlist_reference: str) -> list[str]:
