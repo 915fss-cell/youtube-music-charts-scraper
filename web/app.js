@@ -1,4 +1,4 @@
-const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, explorerPage: 1, explorerPageSize: 100, explorerTotal: 0, snapshotSignature: '', pollTimer: null, playlistReference: '', playlistMatches: [], liveView: 'videos', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
+const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, explorerPage: 1, explorerPageSize: 100, explorerTotal: 0, snapshotSignature: '', pollTimer: null, playlistReference: '', playlistMatches: [], selectedLiveChart: 'TopSongs', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
 const byId = (id) => document.getElementById(id)
 const toast = byId('toast')
 let toastTimer
@@ -58,8 +58,8 @@ function renderMarkets() {
     </label>`).join('')
   const marketOptions = allMarkets.map((market) => `<option value="${escapeHtml(market.code)}">${escapeHtml(market.name)}</option>`).join('')
   byId('filter-market').insertAdjacentHTML('beforeend', marketOptions)
-  byId('live-market').innerHTML = marketOptions
-  byId('live-market').value = 'US'
+  byId('history-market').innerHTML = marketOptions
+  byId('history-market').value = 'US'
   byId('explorer-market').innerHTML = marketOptions
   byId('explorer-market').value = 'US'
   byId('market-options').addEventListener('change', (event) => {
@@ -559,55 +559,64 @@ function renderPlaylistRows(targetId, items) {
   }).join('')
 }
 
-function renderVideoMatches(items) {
+function renderChartMatches() {
+  const chart = state.selectedLiveChart
+  const chartName = chartLabel(chart)
   const container = byId('live-video-results')
-  if (!items.length) {
-    container.innerHTML = '<div class="empty-panel">No playlist videos are charting in this region yet.<span>Try another region or check back after more chart snapshots are saved.</span></div>'
-    byId('live-video-meta').textContent = '0 CHARTING VIDEOS'
+  const chartEntries = state.playlistMatches.filter((entry) => entry.chart_type === chart)
+  byId('live-chart-title').textContent = `${chartName} playlist matches`
+  byId('live-chart-panel').setAttribute('aria-labelledby', `live-tab-${chart}`)
+
+  if (!chartEntries.length) {
+    container.innerHTML = '<div class="empty-panel">No playlist videos are charting in this chart yet.<span>Check back after more chart snapshots are saved.</span></div>'
+    byId('live-chart-meta').textContent = '0 VIDEOS · 0 REGIONS'
     return
   }
+
   const videos = new Map()
-  items.forEach((entry) => {
+  chartEntries.forEach((entry) => {
     const key = entry.video_id || entry.id || entry.title
-    if (!videos.has(key)) videos.set(key, { ...entry, charts: new Map() })
-    videos.get(key).charts.set(`${entry.chart_type}:${entry.market}`, entry)
+    if (!videos.has(key)) videos.set(key, { ...entry, regions: new Map() })
+    videos.get(key).regions.set(entry.market, entry)
   })
-  const groups = [...videos.values()]
+  const groups = [...videos.values()].sort((a, b) => String(a.title).localeCompare(String(b.title)))
+  const regionCount = groups.reduce((total, video) => total + video.regions.size, 0)
   container.innerHTML = groups.map((video) => {
     const thumbnail = video.video_id ? `https://i.ytimg.com/vi/${encodeURIComponent(video.video_id)}/mqdefault.jpg` : ''
-    const charts = [...video.charts.values()].sort((a, b) => chartLabel(a.chart_type).localeCompare(chartLabel(b.chart_type)))
-    const chartList = charts.map((entry) => `<span class="video-chart-chip"><span>${escapeHtml(chartLabel(entry.chart_type))}</span><strong>${entry.rank == null ? '—' : `#${Number(entry.rank)}`} · ${escapeHtml(formatDate(entry.snapshot_date, { month: 'short', day: 'numeric' }))}</strong></span>`).join('')
-    return `<article class="video-match-card"><div class="video-match-heading">${thumbnail ? `<img class="video-match-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}<div class="video-match-copy"><h3>${escapeHtml(video.title)}</h3><p>${charts.length} chart${charts.length === 1 ? '' : 's'} · ${escapeHtml(video.market)}</p></div></div><div class="video-chart-list" aria-label="Charts this video appears in">${chartList}</div></article>`
+    const regions = [...video.regions.values()].sort((a, b) => {
+      const nameA = state.markets.find((market) => market.code === a.market)?.name || a.market
+      const nameB = state.markets.find((market) => market.code === b.market)?.name || b.market
+      return nameA.localeCompare(nameB)
+    })
+    const regionRows = regions.map((entry) => {
+      const regionName = state.markets.find((market) => market.code === entry.market)?.name || entry.market
+      const rankChange = entry.rank_change == null ? null : Number(entry.rank_change)
+      const rankChangeLabel = rankChange == null ? '—' : rankChange > 0 ? `↑ ${rankChange}` : rankChange < 0 ? `↓ ${Math.abs(rankChange)}` : '—'
+      const rankChangeClass = rankChange == null || rankChange === 0 ? 'flat' : rankChange > 0 ? 'up' : 'down'
+      const rankChangeAria = rankChange == null || rankChange === 0 ? 'No rank change recorded' : `${rankChange > 0 ? 'Up' : 'Down'} ${Math.abs(rankChange)} places`
+      return `<tr><td>${escapeHtml(regionName)}</td><td><span class="rank-value">${entry.rank == null ? '—' : `#${Number(entry.rank)}`}</span></td><td><span class="views-value">${formatCompact(entry.view_count)}</span></td><td><span class="rank-change ${rankChangeClass}" aria-label="${rankChangeAria}">${rankChangeLabel}</span></td><td>${escapeHtml(formatDate(entry.snapshot_date, { month: 'short', day: 'numeric', year: '2-digit' }))}</td></tr>`
+    }).join('')
+    return `<article class="video-match-card"><div class="video-match-heading">${thumbnail ? `<img class="video-match-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}<div class="video-match-copy"><h3>${escapeHtml(video.title)}</h3><p>${regions.length} region${regions.length === 1 ? '' : 's'} charting</p></div></div><div class="table-wrap video-region-table-wrap"><table class="video-region-table"><caption class="sr-only">${escapeHtml(chartName)} regional results for ${escapeHtml(video.title)}</caption><thead><tr><th scope="col">REGION</th><th scope="col">RANK</th><th scope="col">WEEKLY VIEWS</th><th scope="col">RANK CHANGE</th><th scope="col">CHART DATE</th></tr></thead><tbody>${regionRows}</tbody></table></div></article>`
   }).join('')
-  byId('live-video-meta').textContent = `${groups.length} CHARTING VIDEOS`
+  byId('live-chart-meta').textContent = `${groups.length} VIDEOS · ${regionCount} REGIONS`
 }
 
-function renderChartMatches() {
-  const chart = byId('live-chart').value
-  const chartName = chartLabel(chart)
-  byId('live-chart-title').textContent = `${chartName} charting now`
-  const items = state.playlistMatches.filter((entry) => entry.chart_type === chart && entry.market === byId('live-market').value)
-  renderPlaylistRows('live-results-body', items)
-  byId('live-chart-meta').textContent = `${items.length} MATCHING VIDEOS`
-}
-
-function setLiveView(view) {
-  state.liveView = view === 'chart' ? 'chart' : 'videos'
-  document.querySelectorAll('[data-live-view]').forEach((button) => {
-    const active = button.dataset.liveView === state.liveView
-    button.classList.toggle('is-active', active)
-    button.setAttribute('aria-pressed', String(active))
+function setLiveChart(chart) {
+  state.selectedLiveChart = chart
+  document.querySelectorAll('[data-chart-type]').forEach((tab) => {
+    const active = tab.dataset.chartType === chart
+    tab.classList.toggle('is-active', active)
+    tab.setAttribute('aria-selected', String(active))
+    tab.tabIndex = active ? 0 : -1
   })
-  byId('live-video-panel').hidden = state.liveView !== 'videos'
-  byId('live-chart-panel').hidden = state.liveView !== 'chart'
-  if (state.liveView === 'chart') renderChartMatches()
+  renderChartMatches()
 }
 
 function playlistQuery(history = false) {
   const params = new URLSearchParams({
     playlist: state.playlistReference,
-    chart_type: byId('live-chart').value,
-    market: byId('live-market').value,
+    chart_type: byId('history-chart').value,
+    market: byId('history-market').value,
   })
   if (history) {
     params.set('page', String(state.historyPage))
@@ -625,13 +634,10 @@ async function loadLiveFilter(event) {
   const button = byId('playlist-submit')
   button.disabled = true
   byId('live-video-results').innerHTML = '<div class="empty-panel">Checking playlist videos against saved charts…</div>'
-  byId('live-results-body').innerHTML = '<tr><td colspan="4" class="loading-cell">Checking saved chart results…</td></tr>'
   try {
-    const params = playlistQuery()
-    params.set('view', 'videos')
+    const params = new URLSearchParams({ playlist: state.playlistReference, view: 'videos' })
     const result = await request(`/api/live-filter?${params}`)
     state.playlistMatches = result.items
-    renderVideoMatches(state.playlistMatches)
     renderChartMatches()
     state.historyPage = 1
     if (location.hash === '#history') await loadPlaylistHistory()
@@ -639,7 +645,6 @@ async function loadLiveFilter(event) {
     errorNode.textContent = error.message
     errorNode.hidden = false
     byId('live-video-results').innerHTML = `<div class="empty-panel">${escapeHtml(error.message)}</div>`
-    byId('live-results-body').innerHTML = `<tr><td colspan="4" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
   } finally {
     button.disabled = false
   }
@@ -695,10 +700,23 @@ byId('explorer-prev').addEventListener('click', () => { state.explorerPage = Mat
 byId('explorer-next').addEventListener('click', () => { state.explorerPage += 1; loadExplorer() })
 byId('save-chart-history').addEventListener('click', collectExplorerChart)
 byId('playlist-form').addEventListener('submit', loadLiveFilter)
-document.querySelectorAll('[data-live-view]').forEach((button) => {
-  button.addEventListener('click', () => setLiveView(button.dataset.liveView))
+const liveChartTabs = [...document.querySelectorAll('[data-chart-type]')]
+liveChartTabs.forEach((tab, index) => {
+  tab.addEventListener('click', () => setLiveChart(tab.dataset.chartType))
+  tab.addEventListener('keydown', (event) => {
+    let nextIndex = index
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % liveChartTabs.length
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + liveChartTabs.length) % liveChartTabs.length
+    else if (event.key === 'Home') nextIndex = 0
+    else if (event.key === 'End') nextIndex = liveChartTabs.length - 1
+    else return
+    event.preventDefault()
+    liveChartTabs[nextIndex].focus()
+    setLiveChart(liveChartTabs[nextIndex].dataset.chartType)
+  })
 })
-byId('live-chart').addEventListener('change', renderChartMatches)
+byId('history-chart').addEventListener('change', () => { state.historyPage = 1; loadPlaylistHistory() })
+byId('history-market').addEventListener('change', () => { state.historyPage = 1; loadPlaylistHistory() })
 byId('load-history').addEventListener('click', loadPlaylistHistory)
 byId('history-prev').addEventListener('click', () => { state.historyPage = Math.max(1, state.historyPage - 1); loadPlaylistHistory() })
 byId('history-next').addEventListener('click', () => { state.historyPage += 1; loadPlaylistHistory() })

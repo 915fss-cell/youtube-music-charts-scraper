@@ -824,17 +824,24 @@ async def playlist_chart_entries(
     page_size: int = 50,
     current_user: str = PUBLIC_USER_ID,
     all_charts: bool = False,
+    all_markets: bool = False,
 ):
     if chart_type not in CHART_TYPES:
         raise HTTPException(status_code=422, detail="Unsupported chart type")
-    if market not in MARKETS:
+    if not all_markets and market not in MARKETS:
         raise HTTPException(status_code=422, detail="Unsupported market")
     video_ids = await asyncio.to_thread(fetch_playlist_video_ids, playlist_reference)
     if not video_ids:
         return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
-    conditions = ["e.user_id=$1", "e.market=$2", "e.entity_type='all'", "e.entity_id='all'", "e.video_id = ANY($3::text[])"]
-    args = [current_user, market, video_ids]
+    conditions = ["e.user_id=$1"]
+    args = [current_user]
+    if not all_markets:
+        conditions.append(f"e.market=${len(args) + 1}")
+        args.append(market)
+    conditions.extend(["e.entity_type='all'", "e.entity_id='all'"])
+    conditions.append(f"e.video_id = ANY(${len(args) + 1}::text[])")
+    args.append(video_ids)
     if not all_charts:
         conditions.append(f"e.chart_type=${len(args) + 1}")
         args.append(chart_type)
@@ -873,7 +880,15 @@ async def live_filter(
     view: Literal["videos", "chart"] = "chart",
 ):
     ensure_same_origin(request)
-    return await playlist_chart_entries(playlist, chart_type, market, history=False, all_charts=view == "videos")
+    return await playlist_chart_entries(
+        playlist,
+        chart_type,
+        market,
+        history=False,
+        page_size=50_000 if view == "videos" else 50,
+        all_charts=view == "videos",
+        all_markets=view == "videos",
+    )
 
 
 @app.get("/api/live-history")
