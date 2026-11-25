@@ -7,7 +7,8 @@ from contextlib import asynccontextmanager, suppress
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.request import urlopen
 from uuid import UUID
 
 import asyncpg
@@ -730,3 +731,111 @@ async def browse_entries(
             *page_args,
         )
     return {"items": [row_dict(row) for row in rows], "total": total, "page": page, "page_size": page_size}
+
+
+def fetch_playlist_video_ids(playlist_reference: str) -> list[str]:
+    api_key = os.environ.get("YOUTUBE_DATA_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Playlist lookup is not configured yet")
+    parsed = urlsplit(playlist_reference)
+    playlist_id = parse_qs(parsed.query).get("list", [None])[0] if parsed.scheme or parsed.netloc else playlist_reference
+    if not playlist_id or len(playlist_id) > 200:
+        raise HTTPException(status_code=422, detail="Enter a valid YouTube playlist URL or ID")
+
+    video_ids: list[str] = []
+    page_token = None
+    try:
+        while len(video_ids) < 1000:
+            params = {
+                "part": "contentDetails",
+                "maxResults": "50",
+                "playlistId": playlist_id,
+                "key": api_key,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            query = urlencode(params)
+            with urlopen(f"https://www.googleapis.com/youtube/v3/playlistItems?{query}", timeout=12) as response:
+                payload = json.loads(response.read())
+            video_ids.extend(
+                item.get("contentDetails", {}).get("videoId")
+                for item in payload.get("items", [])
+                if item.get("contentDetails", {}).get("videoId")
+            )
+            page_token = payload.get("nextPageToken")
+            if not page_token:
+                break
+    except Exception as error:
+        if isinstance(error, HTTPException):
+            raise
+        raise HTTPException(status_code=422, detail="Could not read that playlist. Check the URL and make sure it is public or unlisted.") from error
+    return list(dict.fromkeys(video_ids))
+
+
+async def playlist_chart_entries(
+    playlist_reference: str,
+    chart_type: str,
+    market: str,
+    history: bool,
+    page: int = 1,
+    page_size: int = 50,
+    current_user: str = PUBLIC_USER_ID,
+):
+    if chart_type not in CHART_TYPES:
+        raise HTTPException(status_code=422, detail="Unsupported chart type")
+    if market not in MARKETS:
+        raise HTTPException(status_code=422, detail="Unsupported market")
+    video_ids = await asyncio.to_thread(fetch_playlist_video_ids, playlist_reference)
+    if not video_ids:
+        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+
+    conditions = ["e.user_id=$1", "e.chart_type=$2", "e.market=$3", "e.entity_type='all'", "e.entity_id='all'", "e.video_id = ANY($4::text[])"]
+    args = [current_user, chart_type, market, video_ids]
+    if not history:
+        conditions.append("e.snapshot_date=(SELECT MAX(latest.snapshot_date) FROM yt_chart_entries latest WHERE latest.user_id=e.user_id AND latest.chart_type=e.chart_type AND latest.market=e.market AND latest.entity_type='all' AND latest.entity_id='all')")
+    where = " AND ".join(conditions)
+    database = require_pool()
+    async with database.acquire() as connection:
+        total = await connection.fetchval(f"SELECT COUNT(*) FROM yt_chart_entries e WHERE {where}", *args)
+        rows = await connection.fetch(
+            f"""SELECT e.id,e.snapshot_id,e.chart_type,e.market,e.snapshot_date,e.video_id,
+                       e.title,e.rank,e.view_count,e.metrics,
+                       CASE WHEN e.rank IS NOT NULL AND prior.rank IS NOT NULL THEN prior.rank-e.rank END AS rank_change
+                FROM yt_chart_entries e
+                LEFT JOIN LATERAL (
+                    SELECT previous.rank FROM yt_chart_entries previous
+                    WHERE previous.user_id=e.user_id AND previous.chart_type=e.chart_type
+                      AND previous.market=e.market AND previous.video_id=e.video_id
+                      AND previous.snapshot_date < e.snapshot_date
+                    ORDER BY previous.snapshot_date DESC LIMIT 1
+                ) prior ON TRUE
+                WHERE {where}
+                ORDER BY e.snapshot_date DESC,e.rank ASC NULLS LAST,e.title
+                LIMIT $5 OFFSET $6""",
+            *args, page_size, (page - 1) * page_size,
+        )
+    return {"items": [row_dict(row) for row in rows], "total": total, "page": page, "page_size": page_size}
+
+
+@app.get("/api/live-filter")
+async def live_filter(
+    request: Request,
+    playlist: str = Query(min_length=1, max_length=300),
+    chart_type: str = "TopSongs",
+    market: str = "US",
+):
+    ensure_same_origin(request)
+    return await playlist_chart_entries(playlist, chart_type, market, history=False)
+
+
+@app.get("/api/live-history")
+async def live_history(
+    request: Request,
+    playlist: str = Query(min_length=1, max_length=300),
+    chart_type: str = "TopSongs",
+    market: str = "US",
+    page: int = Query(default=1, ge=1, le=100_000),
+    page_size: int = Query(default=50, ge=1, le=100),
+):
+    ensure_same_origin(request)
+    return await playlist_chart_entries(playlist, chart_type, market, history=True, page=page, page_size=page_size)

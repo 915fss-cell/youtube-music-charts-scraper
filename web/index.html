@@ -3,33 +3,34 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#0b1113" />
+    <meta name="theme-color" content="#0f0f0f" />
     <meta name="description" content="Collect, monitor, and compare YouTube Charts snapshots across regions and dates." />
     <title>YouTube Charts — Track charts over time</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/assets/styles.css?v=20261122" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20261125-pages" />
     <script>
       window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
     </script>
     <script defer src="/_vercel/insights/script.js"></script>
-    <script src="/assets/app.js?v=20261123-authfix" defer></script>
+    <script src="/assets/app.js?v=20261125-pages2" defer></script>
   </head>
   <body>
     <div class="app-shell" id="dashboard">
       <header class="topbar">
         <a class="brand" href="/" aria-label="YouTube Charts home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>youtube charts</span></a>
-        <div class="topbar-center"><span class="status-dot"></span><span>YOUTUBE CHARTS</span><span class="topbar-divider">/</span><span>WEEKLY ARCHIVE</span></div>
-        <div class="account"><span class="account-email">OPEN ARCHIVE</span></div>
+        <nav class="page-nav" aria-label="Main navigation"><a href="#explorer" class="page-link is-active" data-page-link="explorer" aria-current="page">Chart explorer</a><a href="#live-filter" class="page-link" data-page-link="live-filter">Live filter</a><a href="#history" class="page-link" data-page-link="history">History</a></nav>
+        <div class="account"><span class="account-email">YOUTUBE CHARTS</span></div>
       </header>
 
       <main>
+        <div class="page-view is-active" id="page-explorer" data-page-view="explorer">
         <section class="hero">
           <div class="hero-copy">
             <p class="eyebrow">A CLEARER VIEW OF WHAT MOVES</p>
-            <h1>Charts have<br /><span>a longer memory.</span></h1>
-            <p class="hero-description">Collect a chart once. Compare every rank, region, and week that follows.</p>
+            <h1>Chart<br /><span>explorer.</span></h1>
+            <p class="hero-description">Choose a chart, region, and date to explore the videos and artists charting that week.</p>
           </div>
           <div class="hero-aside" aria-label="Collection cadence">
             <div class="orbit orbit-a"></div><div class="orbit orbit-b"></div>
@@ -73,8 +74,32 @@
           </article>
         </section>
 
+        </div>
+
+        <section class="page-view live-filter-page" id="page-live-filter" data-page-view="live-filter" hidden aria-labelledby="live-filter-title">
+          <div class="page-intro"><p class="eyebrow">02 / YOUR PLAYLIST, ON THE CHART</p><h1 id="live-filter-title">Live filter<span>.</span></h1><p class="hero-description">See which videos from your playlist are appearing in the latest saved YouTube charts. Add your playlist when you are ready.</p></div>
+          <section class="panel playlist-panel" aria-label="Playlist filter controls">
+            <form class="playlist-form" id="playlist-form">
+              <label class="field playlist-url-field"><span>YouTube playlist URL or ID</span><input id="playlist-input" name="playlist" type="text" maxlength="300" placeholder="Paste a playlist link or playlist ID" required autocomplete="url" /></label>
+              <label class="field"><span>Chart</span><select id="live-chart"><option value="TopSongs">Top songs</option><option value="TopMusicVideos">Top music videos</option><option value="TopArtists">Top artists</option></select></label>
+              <label class="field"><span>Region</span><select id="live-market"><option value="US">United States</option></select></label>
+              <button class="button button-accent" id="playlist-submit" type="submit">Find charting videos <span aria-hidden="true">↗</span></button>
+            </form>
+            <p class="field-hint">Playlist videos are matched against saved chart snapshots. Public or unlisted playlists are supported.</p>
+            <p class="form-error" id="playlist-error" role="alert" hidden></p>
+          </section>
+          <section class="analysis-section live-results" aria-labelledby="live-results-title"><div class="section-heading"><div><p class="eyebrow">LATEST SAVED SNAPSHOT</p><h2 id="live-results-title">Playlist videos charting now</h2></div><span class="archive-badge" id="live-result-meta">AWAITING PLAYLIST</span></div><div class="table-wrap"><table><thead><tr><th scope="col">DATE / MARKET</th><th scope="col">VIDEO</th><th scope="col">RANK</th><th scope="col">WEEKLY VIEWS</th></tr></thead><tbody id="live-results-body"><tr><td colspan="4" class="empty-cell">Add a playlist to see its charting videos.</td></tr></tbody></table></div></section>
+        </section>
+
+        <section class="page-view history-page" id="page-history" data-page-view="history" hidden>
+          <section class="analysis-section" aria-labelledby="history-title">
+            <div class="section-heading"><div><p class="eyebrow">03 / SAVED PLAYLIST MATCHES</p><h2 id="history-title">Charting history</h2><p class="section-subtitle">Every saved chart snapshot that matched a video in your playlist.</p></div><button class="button button-accent" id="load-history" type="button">Load playlist history</button></div>
+            <div class="table-meta"><span id="history-count">Add a playlist in Live filter to start.</span><span id="history-page-indicator">Page 1</span></div>
+            <div class="table-wrap"><table><thead><tr><th scope="col">DATE / MARKET</th><th scope="col">VIDEO</th><th scope="col">RANK</th><th scope="col">WEEKLY VIEWS</th></tr></thead><tbody id="history-body"><tr><td colspan="4" class="empty-cell">Your playlist chart history will appear here.</td></tr></tbody></table></div>
+            <div class="pagination"><span id="history-range">—</span><div><button class="button button-quiet" id="history-prev" type="button" disabled>Previous</button><button class="button button-quiet" id="history-next" type="button" disabled>Next</button></div></div>
+          </section>
         <section class="analysis-section" aria-labelledby="analysis-title">
-          <div class="section-heading"><div><p class="eyebrow">03 / READ THE HISTORY</p><h2 id="analysis-title">Snapshot explorer</h2><p class="section-subtitle">Changes compare each entry with its latest earlier saved snapshot.</p></div><span class="archive-badge"><span class="status-dot"></span> YOUR DATABASE</span></div>
+          <div class="section-heading"><div><p class="eyebrow">FULL ARCHIVE</p><h2 id="analysis-title">All saved chart data</h2><p class="section-subtitle">Browse saved chart snapshots and compare rank movement over time.</p></div><span class="archive-badge"><span class="status-dot"></span> YOUR DATABASE</span></div>
           <div class="analysis-panel">
             <form class="filter-bar" id="filter-form">
               <label class="field"><span>Chart</span><select id="filter-chart"><option value="">All charts</option><option value="TopSongs">Top songs</option><option value="TopMusicVideos">Top music videos</option><option value="TopArtists">Top artists</option></select></label>
@@ -89,6 +114,7 @@
             <div class="table-wrap"><table><thead><tr><th scope="col">DATE / MARKET</th><th scope="col">CHART ENTRY</th><th scope="col">RANK</th><th scope="col">RANK CHANGE</th><th scope="col">WEEKLY VIEWS</th><th scope="col">VIEW CHANGE VS PRIOR</th></tr></thead><tbody id="entries-body"><tr><td colspan="6" class="loading-cell">Loading the shared archive…</td></tr></tbody></table></div>
             <div class="pagination"><span id="page-indicator">Page 1</span><div><button class="button button-quiet" id="prev-page" type="button" disabled>Previous</button><button class="button button-quiet" id="next-page" type="button" disabled>Next</button></div></div>
           </div>
+        </section>
         </section>
       </main>
       <footer class="footer"><span>CHARTROOM / SNAPSHOTS, NOT GUESSES</span><span id="connection-status" role="status">CONNECTING</span></footer>

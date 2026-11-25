@@ -1,4 +1,4 @@
-const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, snapshotSignature: '', pollTimer: null }
+const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, snapshotSignature: '', pollTimer: null, playlistReference: '', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
 const byId = (id) => document.getElementById(id)
 const toast = byId('toast')
 let toastTimer
@@ -56,7 +56,10 @@ function renderMarkets() {
       <input type="checkbox" name="market" value="${escapeHtml(market.code)}" ${market.code === 'US' ? 'checked' : ''} />
       <span>${escapeHtml(market.code === 'global' ? 'Global' : market.code)}</span>
     </label>`).join('')
-  byId('filter-market').insertAdjacentHTML('beforeend', allMarkets.map((market) => `<option value="${escapeHtml(market.code)}">${escapeHtml(market.name)}</option>`).join(''))
+  const marketOptions = allMarkets.map((market) => `<option value="${escapeHtml(market.code)}">${escapeHtml(market.name)}</option>`).join('')
+  byId('filter-market').insertAdjacentHTML('beforeend', marketOptions)
+  byId('live-market').innerHTML = marketOptions
+  byId('live-market').value = 'US'
   byId('market-options').addEventListener('change', (event) => {
     const changed = event.target
     if (changed.value === 'global' && changed.checked) {
@@ -380,7 +383,7 @@ async function startJob(event) {
       save_configuration: byId('save-configuration').checked,
     }
     const result = await request('/api/jobs', { method: 'POST', body: JSON.stringify(payload) })
-    showToast(`Collection started · ${result.total_tasks} market/week tasks queued.`)
+    showToast(`Chart collection started · ${result.total_tasks} chart snapshots queued.`)
     await Promise.all([loadJobs(), loadSummary(), loadConfigurations()])
   } catch (error) {
     errorNode.textContent = error.message
@@ -397,6 +400,104 @@ async function refreshJobs() {
     showToast(error.message)
   }
 }
+
+function renderPlaylistRows(targetId, items) {
+  const body = byId(targetId)
+  if (!items.length) {
+    body.innerHTML = `<tr><td colspan="4" class="empty-cell">No matching playlist videos were found in the saved chart snapshots.</td></tr>`
+    return
+  }
+  body.innerHTML = items.map((entry) => {
+    const thumbnail = entry.video_id ? `https://i.ytimg.com/vi/${encodeURIComponent(entry.video_id)}/mqdefault.jpg` : ''
+    return `<tr><td><div class="week-market">${escapeHtml(formatDate(entry.snapshot_date, { month: 'short', day: 'numeric', year: '2-digit' }))}<br />${escapeHtml(entry.market)}</div></td><td><div class="entry-cell">${thumbnail ? `<img class="entry-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}<div><div class="entry-title">${escapeHtml(entry.title)}</div><div class="entry-subtitle">${escapeHtml(chartLabel(entry.chart_type))}</div></div></div></td><td><span class="rank-value">${entry.rank == null ? '—' : `#${Number(entry.rank)}`}</span></td><td><span class="views-value">${formatCompact(entry.view_count)}</span></td></tr>`
+  }).join('')
+}
+
+function playlistQuery(history = false) {
+  const params = new URLSearchParams({
+    playlist: state.playlistReference,
+    chart_type: byId('live-chart').value,
+    market: byId('live-market').value,
+  })
+  if (history) {
+    params.set('page', String(state.historyPage))
+    params.set('page_size', String(state.historyPageSize))
+  }
+  return params
+}
+
+async function loadLiveFilter(event) {
+  event?.preventDefault()
+  const errorNode = byId('playlist-error')
+  errorNode.hidden = true
+  state.playlistReference = byId('playlist-input').value.trim()
+  if (!state.playlistReference) return
+  const button = byId('playlist-submit')
+  button.disabled = true
+  byId('live-results-body').innerHTML = '<tr><td colspan="4" class="loading-cell">Checking saved chart results…</td></tr>'
+  try {
+    const result = await request(`/api/live-filter?${playlistQuery()}`)
+    renderPlaylistRows('live-results-body', result.items)
+    byId('live-result-meta').textContent = `${result.total} MATCHING VIDEOS`
+    state.historyPage = 1
+    if (location.hash === '#history') await loadPlaylistHistory()
+  } catch (error) {
+    errorNode.textContent = error.message
+    errorNode.hidden = false
+    byId('live-results-body').innerHTML = `<tr><td colspan="4" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
+  } finally {
+    button.disabled = false
+  }
+}
+
+async function loadPlaylistHistory() {
+  const playlist = byId('playlist-input').value.trim() || state.playlistReference
+  if (!playlist) {
+    byId('history-count').textContent = 'Add a playlist in Live filter to start.'
+    return
+  }
+  state.playlistReference = playlist
+  byId('history-body').innerHTML = '<tr><td colspan="4" class="loading-cell">Loading playlist history…</td></tr>'
+  try {
+    const result = await request(`/api/live-history?${playlistQuery(true)}`)
+    renderPlaylistRows('history-body', result.items)
+    state.historyTotal = result.total
+    const first = result.total ? (state.historyPage - 1) * state.historyPageSize + 1 : 0
+    const last = Math.min(state.historyPage * state.historyPageSize, result.total)
+    const pages = Math.max(1, Math.ceil(result.total / state.historyPageSize))
+    byId('history-count').textContent = result.total ? `${Number(result.total).toLocaleString()} saved playlist matches` : 'No saved playlist matches yet.'
+    byId('history-page-indicator').textContent = `Page ${state.historyPage} of ${pages}`
+    byId('history-range').textContent = result.total ? `${first}–${last} of ${Number(result.total).toLocaleString()}` : '—'
+    byId('history-prev').disabled = state.historyPage <= 1
+    byId('history-next').disabled = state.historyPage >= pages
+  } catch (error) {
+    byId('history-body').innerHTML = `<tr><td colspan="4" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
+  }
+}
+
+function activatePage(page) {
+  const validPage = ['explorer', 'live-filter', 'history'].includes(page) ? page : 'explorer'
+  document.querySelectorAll('[data-page-view]').forEach((view) => {
+    const active = view.dataset.pageView === validPage
+    view.hidden = !active
+    view.classList.toggle('is-active', active)
+  })
+  document.querySelectorAll('[data-page-link]').forEach((link) => {
+    const active = link.dataset.pageLink === validPage
+    link.classList.toggle('is-active', active)
+    if (active) link.setAttribute('aria-current', 'page')
+    else link.removeAttribute('aria-current')
+  })
+  if (validPage === 'history' && state.playlistReference) loadPlaylistHistory()
+}
+
+byId('playlist-form').addEventListener('submit', loadLiveFilter)
+byId('load-history').addEventListener('click', loadPlaylistHistory)
+byId('history-prev').addEventListener('click', () => { state.historyPage = Math.max(1, state.historyPage - 1); loadPlaylistHistory() })
+byId('history-next').addEventListener('click', () => { state.historyPage += 1; loadPlaylistHistory() })
+document.querySelectorAll('[data-page-link]').forEach((link) => link.addEventListener('click', () => activatePage(link.dataset.pageLink)))
+window.addEventListener('hashchange', () => activatePage(location.hash.slice(1)))
+activatePage(location.hash.slice(1))
 
 byId('job-form').addEventListener('submit', startJob)
 byId('entity-type').addEventListener('change', () => {
