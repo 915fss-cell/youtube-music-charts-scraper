@@ -1,4 +1,4 @@
-const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, snapshotSignature: '', pollTimer: null }
+const state = { markets: [], entities: [], configurations: [], jobs: [], entries: [], trend: [], expandedJobs: new Set(), page: 1, pageSize: 25, total: 0, explorerPage: 1, explorerPageSize: 100, explorerTotal: 0, snapshotSignature: '', pollTimer: null, playlistReference: '', historyPage: 1, historyPageSize: 50, historyTotal: 0 }
 const byId = (id) => document.getElementById(id)
 const toast = byId('toast')
 let toastTimer
@@ -56,7 +56,12 @@ function renderMarkets() {
       <input type="checkbox" name="market" value="${escapeHtml(market.code)}" ${market.code === 'US' ? 'checked' : ''} />
       <span>${escapeHtml(market.code === 'global' ? 'Global' : market.code)}</span>
     </label>`).join('')
-  byId('filter-market').insertAdjacentHTML('beforeend', allMarkets.map((market) => `<option value="${escapeHtml(market.code)}">${escapeHtml(market.name)}</option>`).join(''))
+  const marketOptions = allMarkets.map((market) => `<option value="${escapeHtml(market.code)}">${escapeHtml(market.name)}</option>`).join('')
+  byId('filter-market').insertAdjacentHTML('beforeend', marketOptions)
+  byId('live-market').innerHTML = marketOptions
+  byId('live-market').value = 'US'
+  byId('explorer-market').innerHTML = marketOptions
+  byId('explorer-market').value = 'US'
   byId('market-options').addEventListener('change', (event) => {
     const changed = event.target
     if (changed.value === 'global' && changed.checked) {
@@ -247,7 +252,7 @@ async function loadSummary() {
   if (state.snapshotSignature && state.snapshotSignature !== signature) {
     await loadEntities()
     state.page = 1
-    await loadEntries()
+    await Promise.all([loadEntries(), loadExplorer()])
   }
   state.snapshotSignature = signature
 }
@@ -345,12 +350,113 @@ async function loadEntries() {
   }
 }
 
+function explorerQuery() {
+  const params = new URLSearchParams({
+    chart_type: byId('explorer-chart').value,
+    market: byId('explorer-market').value,
+    page: String(state.explorerPage),
+    page_size: String(state.explorerPageSize),
+    entity_type: 'all',
+    entity_id: 'all',
+  })
+  const date = byId('explorer-date').value
+  if (date) {
+    params.set('start_date', date)
+    params.set('end_date', date)
+  } else {
+    params.set('latest_only', 'true')
+  }
+  const search = byId('explorer-query').value.trim()
+  if (search) params.set('search', search)
+  return params
+}
+
+function renderExplorerEntries(entries) {
+  const body = byId('explorer-entries-body')
+  if (!entries.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty-cell">No snapshots saved yet. Open on YouTube above to view the current chart without saving anything.</td></tr>'
+    return
+  }
+  body.innerHTML = entries.map((entry) => {
+    const rank = entry.rank == null ? '—' : `#${Number(entry.rank)}`
+    const movement = entry.rank_change == null
+      ? '<span class="rank-change new">NEW</span>'
+      : `<span class="rank-change ${Number(entry.rank_change) > 0 ? 'up' : Number(entry.rank_change) < 0 ? 'down' : 'flat'}">${Number(entry.rank_change) > 0 ? '↑ ' : Number(entry.rank_change) < 0 ? '↓ ' : '='}${Number(entry.rank_change) ? Math.abs(Number(entry.rank_change)) : ''}</span>`
+    const thumbnail = entry.video_id ? `https://i.ytimg.com/vi/${encodeURIComponent(entry.video_id)}/mqdefault.jpg` : ''
+    const metrics = entry.metrics || {}
+    const previous = entry.previous_rank == null ? '—' : `#${Number(entry.previous_rank)}`
+    return `<tr><td class="explorer-rank">${rank}</td><td>${movement}</td><td><div class="entry-cell">${thumbnail ? `<img class="entry-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '<span class="entry-thumb-fallback" aria-hidden="true">YT</span>'}<div><div class="entry-title">${escapeHtml(entry.title)}</div><div class="entry-subtitle">${escapeHtml((metrics.artists || []).join?.(', ') || chartLabel(entry.chart_type))}</div></div></div></td><td><span class="views-value">${formatCompact(entry.view_count)}</span></td><td>${previous}</td><td>${escapeHtml(metrics.weeks_on_chart || '—')}</td><td>${escapeHtml(metrics.release_date || '—')}</td></tr>`
+  }).join('')
+}
+
+function openOfficialChart() {
+  const chart = byId('explorer-chart').value
+  const market = byId('explorer-market').value.toLowerCase()
+  const chartDate = byId('explorer-date').value || lastChartFriday()
+  const chartUrl = `https://charts.youtube.com/charts/${encodeURIComponent(chart)}/${encodeURIComponent(market)}/weekly/${encodeURIComponent(chartDate)}`
+  window.open(chartUrl, '_blank', 'noopener,noreferrer')
+}
+
+async function loadExplorer() {
+  const body = byId('explorer-entries-body')
+  if (!body) return
+  body.innerHTML = '<tr><td colspan="7" class="loading-cell">Loading chart entries…</td></tr>'
+  const market = state.markets.find((item) => item.code === byId('explorer-market').value)
+  const chart = byId('explorer-chart').value
+  byId('explorer-chart-title').textContent = `${chartLabel(chart)} · ${market?.name || byId('explorer-market').value}`
+  try {
+    const result = await request(`/api/entries?${explorerQuery()}`)
+    state.explorerTotal = result.total
+    renderExplorerEntries(result.items)
+    const date = result.items[0]?.snapshot_date || byId('explorer-date').value
+    byId('explorer-date-label').textContent = date ? `${formatDate(date)} · Saved chart snapshot` : 'No saved snapshot yet'
+    byId('explorer-meta').textContent = `${Number(result.total).toLocaleString()} ${result.total === 1 ? 'entry' : 'entries'} · ${chart === 'TopArtists' ? 'artist chart' : 'weekly chart'}`
+    byId('explorer-count').textContent = result.total ? `Showing ${(state.explorerPage - 1) * state.explorerPageSize + 1}–${Math.min(state.explorerPage * state.explorerPageSize, result.total)} of ${Number(result.total).toLocaleString()} chart entries.` : 'No saved entries for this chart yet.'
+    const pages = Math.max(1, Math.ceil(result.total / state.explorerPageSize))
+    byId('explorer-page-indicator').textContent = `Page ${state.explorerPage} of ${pages}`
+    byId('explorer-prev').disabled = state.explorerPage <= 1
+    byId('explorer-next').disabled = state.explorerPage >= pages
+  } catch (error) {
+    body.innerHTML = `<tr><td colspan="7" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
+    byId('explorer-meta').textContent = 'Unable to load chart'
+  }
+}
+
+async function collectExplorerChart() {
+  const button = byId('save-chart-history')
+  button.disabled = true
+  try {
+    const chartDate = byId('explorer-date').value || lastChartFriday()
+    const market = byId('explorer-market').value
+    const chartType = byId('explorer-chart').value
+    await request('/api/jobs', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: `Chart explorer · ${chartLabel(chartType)}`,
+        chart_type: chartType,
+        entity_type: 'all',
+        entity_id: 'all',
+        markets: [market],
+        start_date: chartDate,
+        end_date: chartDate,
+        save_configuration: false,
+      }),
+    })
+    showToast(`Collection queued for ${market} · ${chartDate}.`)
+    await Promise.all([loadJobs(), loadSummary()])
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    button.disabled = false
+  }
+}
+
 async function loadWorkspace() {
   try {
     state.markets = await request('/api/markets')
     renderMarkets()
     await loadEntities()
-    await Promise.all([loadSummary(), loadConfigurations(), loadJobs(), loadEntries()])
+    await Promise.all([loadSummary(), loadConfigurations(), loadJobs(), loadEntries(), loadExplorer()])
     byId('connection-status').textContent = 'DATABASE CONNECTED'
     byId('connection-status').style.color = 'var(--green)'
     clearInterval(state.pollTimer)
@@ -380,7 +486,7 @@ async function startJob(event) {
       save_configuration: byId('save-configuration').checked,
     }
     const result = await request('/api/jobs', { method: 'POST', body: JSON.stringify(payload) })
-    showToast(`Collection started · ${result.total_tasks} market/week tasks queued.`)
+    showToast(`Chart collection started · ${result.total_tasks} chart snapshots queued.`)
     await Promise.all([loadJobs(), loadSummary(), loadConfigurations()])
   } catch (error) {
     errorNode.textContent = error.message
@@ -397,6 +503,109 @@ async function refreshJobs() {
     showToast(error.message)
   }
 }
+
+function renderPlaylistRows(targetId, items) {
+  const body = byId(targetId)
+  if (!items.length) {
+    body.innerHTML = `<tr><td colspan="4" class="empty-cell">No matching playlist videos were found in the saved chart snapshots.</td></tr>`
+    return
+  }
+  body.innerHTML = items.map((entry) => {
+    const thumbnail = entry.video_id ? `https://i.ytimg.com/vi/${encodeURIComponent(entry.video_id)}/mqdefault.jpg` : ''
+    return `<tr><td><div class="week-market">${escapeHtml(formatDate(entry.snapshot_date, { month: 'short', day: 'numeric', year: '2-digit' }))}<br />${escapeHtml(entry.market)}</div></td><td><div class="entry-cell">${thumbnail ? `<img class="entry-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}<div><div class="entry-title">${escapeHtml(entry.title)}</div><div class="entry-subtitle">${escapeHtml(chartLabel(entry.chart_type))}</div></div></div></td><td><span class="rank-value">${entry.rank == null ? '—' : `#${Number(entry.rank)}`}</span></td><td><span class="views-value">${formatCompact(entry.view_count)}</span></td></tr>`
+  }).join('')
+}
+
+function playlistQuery(history = false) {
+  const params = new URLSearchParams({
+    playlist: state.playlistReference,
+    chart_type: byId('live-chart').value,
+    market: byId('live-market').value,
+  })
+  if (history) {
+    params.set('page', String(state.historyPage))
+    params.set('page_size', String(state.historyPageSize))
+  }
+  return params
+}
+
+async function loadLiveFilter(event) {
+  event?.preventDefault()
+  const errorNode = byId('playlist-error')
+  errorNode.hidden = true
+  state.playlistReference = byId('playlist-input').value.trim()
+  if (!state.playlistReference) return
+  const button = byId('playlist-submit')
+  button.disabled = true
+  byId('live-results-body').innerHTML = '<tr><td colspan="4" class="loading-cell">Checking saved chart results…</td></tr>'
+  try {
+    const result = await request(`/api/live-filter?${playlistQuery()}`)
+    renderPlaylistRows('live-results-body', result.items)
+    byId('live-result-meta').textContent = `${result.total} MATCHING VIDEOS`
+    state.historyPage = 1
+    if (location.hash === '#history') await loadPlaylistHistory()
+  } catch (error) {
+    errorNode.textContent = error.message
+    errorNode.hidden = false
+    byId('live-results-body').innerHTML = `<tr><td colspan="4" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
+  } finally {
+    button.disabled = false
+  }
+}
+
+async function loadPlaylistHistory() {
+  const playlist = byId('playlist-input').value.trim() || state.playlistReference
+  if (!playlist) {
+    byId('history-count').textContent = 'Add a playlist in Live filter to start.'
+    return
+  }
+  state.playlistReference = playlist
+  byId('history-body').innerHTML = '<tr><td colspan="4" class="loading-cell">Loading playlist history…</td></tr>'
+  try {
+    const result = await request(`/api/live-history?${playlistQuery(true)}`)
+    renderPlaylistRows('history-body', result.items)
+    state.historyTotal = result.total
+    const first = result.total ? (state.historyPage - 1) * state.historyPageSize + 1 : 0
+    const last = Math.min(state.historyPage * state.historyPageSize, result.total)
+    const pages = Math.max(1, Math.ceil(result.total / state.historyPageSize))
+    byId('history-count').textContent = result.total ? `${Number(result.total).toLocaleString()} saved playlist matches` : 'No saved playlist matches yet.'
+    byId('history-page-indicator').textContent = `Page ${state.historyPage} of ${pages}`
+    byId('history-range').textContent = result.total ? `${first}–${last} of ${Number(result.total).toLocaleString()}` : '—'
+    byId('history-prev').disabled = state.historyPage <= 1
+    byId('history-next').disabled = state.historyPage >= pages
+  } catch (error) {
+    byId('history-body').innerHTML = `<tr><td colspan="4" class="empty-cell">${escapeHtml(error.message)}</td></tr>`
+  }
+}
+
+function activatePage(page) {
+  const validPage = ['explorer', 'live-filter', 'history'].includes(page) ? page : 'explorer'
+  document.querySelectorAll('[data-page-view]').forEach((view) => {
+    const active = view.dataset.pageView === validPage
+    view.hidden = !active
+    view.classList.toggle('is-active', active)
+  })
+  document.querySelectorAll('[data-page-link]').forEach((link) => {
+    const active = link.dataset.pageLink === validPage
+    link.classList.toggle('is-active', active)
+    if (active) link.setAttribute('aria-current', 'page')
+    else link.removeAttribute('aria-current')
+  })
+  if (validPage === 'history' && state.playlistReference) loadPlaylistHistory()
+}
+
+byId('load-chart').addEventListener('click', openOfficialChart)
+byId('explorer-search-form').addEventListener('submit', (event) => { event.preventDefault(); state.explorerPage = 1; loadExplorer() })
+byId('explorer-prev').addEventListener('click', () => { state.explorerPage = Math.max(1, state.explorerPage - 1); loadExplorer() })
+byId('explorer-next').addEventListener('click', () => { state.explorerPage += 1; loadExplorer() })
+byId('save-chart-history').addEventListener('click', collectExplorerChart)
+byId('playlist-form').addEventListener('submit', loadLiveFilter)
+byId('load-history').addEventListener('click', loadPlaylistHistory)
+byId('history-prev').addEventListener('click', () => { state.historyPage = Math.max(1, state.historyPage - 1); loadPlaylistHistory() })
+byId('history-next').addEventListener('click', () => { state.historyPage += 1; loadPlaylistHistory() })
+document.querySelectorAll('[data-page-link]').forEach((link) => link.addEventListener('click', () => activatePage(link.dataset.pageLink)))
+window.addEventListener('hashchange', () => activatePage(location.hash.slice(1)))
+activatePage(location.hash.slice(1))
 
 byId('job-form').addEventListener('submit', startJob)
 byId('entity-type').addEventListener('change', () => {

@@ -87,6 +87,7 @@ def _read_rows(page) -> list[dict]:
         metric_nodes = row.locator("div.metric.content.center")
         raw_metrics = [_text(metric_nodes.nth(i)) for i in range(metric_nodes.count())]
         metrics = {
+            "artists": artists,
             "release_date": raw_metrics[0] if len(raw_metrics) > 0 else None,
             "last_week_position": raw_metrics[1] if len(raw_metrics) > 1 else None,
             "weeks_on_chart": raw_metrics[2] if len(raw_metrics) > 2 else None,
