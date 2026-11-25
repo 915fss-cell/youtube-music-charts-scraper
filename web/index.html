@@ -86,15 +86,16 @@
         </div>
 
         <section class="page-view live-filter-page" id="page-live-filter" data-page-view="live-filter" hidden aria-labelledby="live-filter-title">
-          <div class="page-intro"><p class="eyebrow">02 / YOUR PLAYLIST, ON THE CHART</p><h1 id="live-filter-title">Live filter<span>.</span></h1><p class="hero-description">See which videos from your playlist are appearing in the latest saved YouTube charts. Add your playlist when you are ready.</p></div>
+          <div class="page-intro"><p class="eyebrow">02 / YOUR PLAYLISTS, ON THE CHART</p><h1 id="live-filter-title">Live filter<span>.</span></h1><p class="hero-description">See which videos from your playlists are appearing in the latest saved YouTube charts. Your two playlists are ready to track.</p></div>
           <section class="panel playlist-panel" aria-label="Playlist filter controls">
             <form class="playlist-form" id="playlist-form">
-              <label class="field playlist-url-field"><span>YouTube playlist URL or ID</span><input id="playlist-input" name="playlist" type="text" maxlength="300" placeholder="Paste a playlist link or playlist ID" required autocomplete="url" /></label>
+              <label class="field playlist-url-field"><span>YouTube playlist URLs or IDs · one per line</span><textarea id="playlist-input" name="playlist" maxlength="1000" rows="3" required autocomplete="url">youtube.com/playlist?list=PLJRJMLFc5iG8
+youtube.com/playlist?list=PLL3g3XPIkAE0</textarea></label>
               <label class="field"><span>Chart</span><select id="live-chart"><option value="TopSongs">Songs</option><option value="TopMusicVideos">Music Videos</option><option value="TopArtists">Artists</option><option value="TopShortsSongs">Shorts Songs</option></select></label>
               <label class="field"><span>Region</span><select id="live-market"><option value="US">United States</option></select></label>
               <button class="button button-accent" id="playlist-submit" type="submit">Find charting videos <span aria-hidden="true">↗</span></button>
             </form>
-            <p class="field-hint">Playlist videos are matched against saved chart snapshots. Public or unlisted playlists are supported.</p>
+            <p class="field-hint">Playlist videos are matched against saved chart snapshots. Add one public or unlisted playlist URL or ID per line.</p>
             <p class="form-error" id="playlist-error" role="alert" hidden></p>
           </section>
           <section class="analysis-section live-results" aria-labelledby="live-results-title"><div class="section-heading"><div><p class="eyebrow">LATEST SAVED SNAPSHOT</p><h2 id="live-results-title">Playlist videos charting now</h2></div><span class="archive-badge" id="live-result-meta">AWAITING PLAYLIST</span></div><div class="table-wrap"><table><thead><tr><th scope="col">DATE / MARKET</th><th scope="col">VIDEO</th><th scope="col">RANK</th><th scope="col">WEEKLY VIEWS</th></tr></thead><tbody id="live-results-body"><tr><td colspan="4" class="empty-cell">Add a playlist to see its charting videos.</td></tr></tbody></table></div></section>
