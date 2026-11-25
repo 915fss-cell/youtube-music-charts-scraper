@@ -374,7 +374,7 @@ function explorerQuery() {
 function renderExplorerEntries(entries) {
   const body = byId('explorer-entries-body')
   if (!entries.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-cell">No saved chart entries match. Collect this chart to add a snapshot to the archive.</td></tr>'
+    body.innerHTML = '<tr><td colspan="7" class="empty-cell">No snapshots saved yet. Open on YouTube above to view the current chart without saving anything.</td></tr>'
     return
   }
   body.innerHTML = entries.map((entry) => {
@@ -387,6 +387,14 @@ function renderExplorerEntries(entries) {
     const previous = entry.previous_rank == null ? '—' : `#${Number(entry.previous_rank)}`
     return `<tr><td class="explorer-rank">${rank}</td><td>${movement}</td><td><div class="entry-cell">${thumbnail ? `<img class="entry-thumb" src="${thumbnail}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '<span class="entry-thumb-fallback" aria-hidden="true">YT</span>'}<div><div class="entry-title">${escapeHtml(entry.title)}</div><div class="entry-subtitle">${escapeHtml((metrics.artists || []).join?.(', ') || chartLabel(entry.chart_type))}</div></div></div></td><td><span class="views-value">${formatCompact(entry.view_count)}</span></td><td>${previous}</td><td>${escapeHtml(metrics.weeks_on_chart || '—')}</td><td>${escapeHtml(metrics.release_date || '—')}</td></tr>`
   }).join('')
+}
+
+function openOfficialChart() {
+  const chart = byId('explorer-chart').value
+  const market = byId('explorer-market').value.toLowerCase()
+  const chartDate = byId('explorer-date').value || lastChartFriday()
+  const chartUrl = `https://charts.youtube.com/charts/${encodeURIComponent(chart)}/${encodeURIComponent(market)}/weekly/${encodeURIComponent(chartDate)}`
+  window.open(chartUrl, '_blank', 'noopener,noreferrer')
 }
 
 async function loadExplorer() {
@@ -586,7 +594,7 @@ function activatePage(page) {
   if (validPage === 'history' && state.playlistReference) loadPlaylistHistory()
 }
 
-byId('load-chart').addEventListener('click', () => { state.explorerPage = 1; loadExplorer() })
+byId('load-chart').addEventListener('click', openOfficialChart)
 byId('explorer-search-form').addEventListener('submit', (event) => { event.preventDefault(); state.explorerPage = 1; loadExplorer() })
 byId('explorer-prev').addEventListener('click', () => { state.explorerPage = Math.max(1, state.explorerPage - 1); loadExplorer() })
 byId('explorer-next').addEventListener('click', () => { state.explorerPage += 1; loadExplorer() })
