@@ -28,9 +28,9 @@
         <div class="page-view is-active" id="page-explorer" data-page-view="explorer">
         <section class="explorer-controls panel" aria-label="Chart explorer filters">
           <label class="field"><span>Market</span><select id="explorer-market" aria-label="Market"></select></label>
-          <label class="field"><span>Chart</span><select id="explorer-chart"><option value="TopSongs">Top songs</option><option value="TopMusicVideos">Top music videos</option><option value="TopArtists">Top artists</option></select></label>
-          <label class="field explorer-date-field"><span>Date · blank uses latest</span><input id="explorer-date" type="date" min="2016-01-01" aria-label="Chart date (leave blank for latest)" /></label>
-          <button class="button button-accent explorer-load" id="load-chart" type="button">Open on YouTube</button>
+          <label class="field"><span>Chart</span><select id="explorer-chart"><option value="PopularMusicVideos">Popular music videos · live</option><option value="TopSongs">Top songs · saved snapshots</option><option value="TopMusicVideos">Top music videos · saved snapshots</option><option value="TopArtists">Top artists · saved snapshots</option></select></label>
+          <label class="field explorer-date-field"><span>Date · saved snapshots only</span><input id="explorer-date" type="date" min="2016-01-01" aria-label="Snapshot date (applies to saved snapshots)" /></label>
+          <button class="button button-accent explorer-load" id="load-chart" type="button">Refresh live list</button>
         </section>
 
         <section class="explorer-section" aria-labelledby="explorer-title">
@@ -42,7 +42,7 @@
           <p class="explorer-count" id="explorer-count" aria-live="polite">Choose a chart to browse its saved entries.</p>
           <section class="explorer-table-card" aria-label="Chart ranking results">
             <div class="explorer-table-heading"><strong id="explorer-chart-title">Top songs · United States</strong><span id="explorer-date-label">Latest saved snapshot</span></div>
-            <div class="explorer-table-tools"><span>Open the selected live chart on YouTube Charts. The table shows saved snapshots only.</span><button class="button button-quiet" id="save-chart-history" type="button">Save snapshot</button></div>
+            <div class="explorer-table-tools"><span id="explorer-source-note">Live results are from YouTube&apos;s Most Popular Music category, not the official weekly YouTube Charts.</span><button class="button button-quiet" id="save-chart-history" type="button">Save snapshot</button></div>
             <div class="table-wrap explorer-table-wrap"><table><thead><tr><th scope="col">Rank</th><th scope="col">Movement</th><th scope="col">Chart entry</th><th scope="col">Weekly views</th><th scope="col">Previous</th><th scope="col">Weeks on chart</th><th scope="col">Release date</th></tr></thead><tbody id="explorer-entries-body"><tr><td colspan="7" class="loading-cell">Loading chart entries…</td></tr></tbody></table></div>
             <div class="pagination explorer-pagination"><span id="explorer-page-indicator">Page 1</span><div><button class="button button-quiet" id="explorer-prev" type="button" disabled>Previous</button><button class="button button-quiet" id="explorer-next" type="button" disabled>Next</button></div></div>
           </section>
